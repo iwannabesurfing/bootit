@@ -1,0 +1,92 @@
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" width="1024" height="1024">
+  <defs>
+    <!-- Background: blue → purple, diagonal -->
+    <linearGradient id="bg" x1="0.08" y1="0" x2="0.92" y2="1">
+      <stop offset="0%"  stop-color="#3E63F0"/>
+      <stop offset="55%" stop-color="#6248EC"/>
+      <stop offset="100%" stop-color="#9438E4"/>
+    </linearGradient>
+
+    <!-- Luminous top-center halo (the "energized" lift) -->
+    <radialGradient id="halo" cx="50%" cy="20%" r="62%">
+      <stop offset="0%"  stop-color="#86B4FF" stop-opacity="0.55"/>
+      <stop offset="55%" stop-color="#86B4FF" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#86B4FF" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Metal connector cap -->
+    <linearGradient id="cap" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0%"  stop-color="#F1F4FA"/>
+      <stop offset="50%" stop-color="#C9D0DE"/>
+      <stop offset="100%" stop-color="#9AA3B6"/>
+    </linearGradient>
+
+    <!-- Drive body: light half (one OS) -->
+    <linearGradient id="bodyLight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#FBFCFF"/>
+      <stop offset="100%" stop-color="#D4DBEC"/>
+    </linearGradient>
+
+    <!-- Drive body: dark half (the other OS) -->
+    <linearGradient id="bodyDark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#48516A"/>
+      <stop offset="100%" stop-color="#222A3C"/>
+    </linearGradient>
+
+    <!-- Boot button disc -->
+    <linearGradient id="disc" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0%"  stop-color="#5A7CF8"/>
+      <stop offset="100%" stop-color="#7A3CE2"/>
+    </linearGradient>
+
+    <!-- Soft glow behind the boot button -->
+    <radialGradient id="discGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"  stop-color="#A9C5FF" stop-opacity="0.85"/>
+      <stop offset="60%" stop-color="#7E9BFF" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#7E9BFF" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Grounding shadow under the drive -->
+    <radialGradient id="drop" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"  stop-color="#0A0820" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#0A0820" stop-opacity="0"/>
+    </radialGradient>
+
+    <clipPath id="bodyClip">
+      <rect x="360" y="296" width="304" height="474" rx="52"/>
+    </clipPath>
+  </defs>
+
+  <!-- Canvas -->
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <rect width="1024" height="1024" rx="224" fill="url(#halo)"/>
+
+  <!-- Grounding shadow -->
+  <ellipse cx="512" cy="788" rx="178" ry="34" fill="url(#drop)"/>
+
+  <!-- Connector cap (drawn first; body overlaps its base) -->
+  <rect x="440" y="186" width="144" height="146" rx="14" fill="url(#cap)"/>
+  <rect x="468" y="214" width="28" height="38" rx="5" fill="#2B3242"/>
+  <rect x="528" y="214" width="28" height="38" rx="5" fill="#2B3242"/>
+
+  <!-- Drive body: two tones for dual-platform -->
+  <g clip-path="url(#bodyClip)">
+    <rect x="360" y="296" width="152" height="474" fill="url(#bodyLight)"/>
+    <rect x="512" y="296" width="152" height="474" fill="url(#bodyDark)"/>
+    <!-- crisp seam -->
+    <rect x="510" y="296" width="4" height="474" fill="#000000" opacity="0.10"/>
+    <!-- top specular highlight -->
+    <rect x="360" y="296" width="304" height="60" fill="#FFFFFF" opacity="0.14"/>
+  </g>
+
+  <!-- Boot button -->
+  <circle cx="512" cy="536" r="150" fill="url(#discGlow)"/>
+  <circle cx="512" cy="536" r="92" fill="url(#disc)"/>
+  <circle cx="512" cy="536" r="92" fill="none" stroke="#FFFFFF" stroke-opacity="0.30" stroke-width="3"/>
+
+  <!-- Power glyph -->
+  <g stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" fill="none">
+    <path d="M485 496 A48 48 0 1 0 539 496"/>
+    <line x1="512" y1="484" x2="512" y2="532"/>
+  </g>
+</svg>
