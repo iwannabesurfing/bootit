@@ -5,6 +5,9 @@ struct USBDisk: Identifiable, Hashable {
     let name: String
     let sizeText: String
     var label: String { "\(id) — \(name) (\(sizeText))" }
+    /// Just the BSD name ("disk4") — what a user sees in Disk Utility, and the
+    /// identifier worth showing them before they erase the wrong thing.
+    var deviceID: String { (id as NSString).lastPathComponent }
 }
 
 /// Lists external, physical, removable disks via `diskutil`. The internal

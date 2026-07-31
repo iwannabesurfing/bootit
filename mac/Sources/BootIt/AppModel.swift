@@ -32,6 +32,8 @@ final class AppModel: ObservableObject {
     // Source
     @Published var source: SourceMode = .download
     @Published var hasAcknowledgedErase = false
+    /// Drives the system confirmation shown before anything is erased.
+    @Published var isConfirmingErase = false
 
     // Windows
     @Published var osChoice: OSChoice = .windows11
@@ -66,7 +68,8 @@ final class AppModel: ObservableObject {
 
     // USB
     @Published var disks: [USBDisk] = []
-    @Published var diskIndex = 0
+    /// Nil until the user picks a drive — nothing destructive is ever preselected.
+    @Published var diskIndex: Int?
     @Published var refreshingDisks = false
 
     // Progress
@@ -84,7 +87,10 @@ final class AppModel: ObservableObject {
     private var catalogLoadID = 0
 
     var osKey: String { osChoice.rawValue }
-    var selectedDrive: USBDisk? { diskIndex < disks.count ? disks[diskIndex] : nil }
+    var selectedDrive: USBDisk? {
+        guard let index = diskIndex, index < disks.count else { return nil }
+        return disks[index]
+    }
     var canStart: Bool { selectedDrive != nil && hasAcknowledgedErase }
 
     /// Whether the options step has enough loaded to continue.
@@ -175,12 +181,16 @@ final class AppModel: ObservableObject {
 
     func refreshDisks() {
         refreshingDisks = true
+        let previous = selectedDrive?.id
         worker.async { [weak self] in
             guard let self else { return }
             let found = DiskLister.external()
             self.onMain {
                 self.disks = found
-                if self.diskIndex >= found.count { self.diskIndex = 0 }
+                // Track the same physical drive across a rescan. If it was
+                // unplugged, select nothing — never let the selection slide onto
+                // whichever drive happens to inherit its index.
+                self.diskIndex = previous.flatMap { id in found.firstIndex { $0.id == id } }
                 self.hasAcknowledgedErase = false
                 self.refreshingDisks = false
             }
@@ -204,6 +214,10 @@ final class AppModel: ObservableObject {
     }
 
     func start() {
+        // Nothing runs without a live selection — this also removes the
+        // out-of-range crash the old `disks[diskIndex]` could hit if a drive
+        // disappeared between selection and Start.
+        guard let drive = selectedDrive else { return }
         cancelFlag.reset()
         runError = nil
         progress = 0
@@ -216,7 +230,7 @@ final class AppModel: ObservableObject {
         let request = BuildRequest(
             platform: platform ?? .windows,
             source: source,
-            disk: disks[diskIndex].id,
+            disk: drive.id,
             osKey: osKey,
             skuID: (languageIndex < languages.count) ? languages[languageIndex].id : nil,
             localISO: localISOPath,
@@ -236,6 +250,7 @@ final class AppModel: ObservableObject {
         platform = nil
         source = .download
         hasAcknowledgedErase = false
+        isConfirmingErase = false
         progress = 0; logText = ""; runError = nil; running = false; statusText = "Starting…"
         editions = []; languages = []; macInstallers = []
         selectedMacGroupTitle = ""; selectedMacBuild = ""; showOlderMacBuilds = false

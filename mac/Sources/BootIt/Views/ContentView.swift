@@ -17,6 +17,28 @@ struct ContentView: View {
         }
         .animation(.easeInOut(duration: 0.18), value: model.step)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .confirmationDialog(eraseTitle,
+                            isPresented: $model.isConfirmingErase,
+                            titleVisibility: .visible) {
+            Button("Erase and Create", role: .destructive) { model.start() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(eraseMessage)
+        }
+    }
+
+    // MARK: Destructive confirmation
+
+    private var eraseTitle: String {
+        guard let drive = model.selectedDrive else { return "Erase this drive?" }
+        return "Erase “\(drive.name)”?"
+    }
+
+    private var eraseMessage: String {
+        guard let drive = model.selectedDrive else { return "This cannot be undone." }
+        let target = model.platform == .macos ? "macOS" : "Windows"
+        return "This permanently removes everything on \(drive.deviceID) (\(drive.sizeText)) "
+            + "and creates a bootable \(target) installer. This action cannot be undone."
     }
 
     @ViewBuilder private var stepBody: some View {
@@ -32,16 +54,14 @@ struct ContentView: View {
 
     // MARK: Footer
 
-    private var showBack: Bool { [.source, .options, .usb].contains(model.step) }
-
     private var footer: some View {
         HStack(spacing: 12) {
             if model.step == .done {
                 Button("Make Another") { model.reset() }
                     .buttonStyle(.plain).foregroundStyle(.secondary)
                     .accessibilityIdentifier("make-another-button")
-            } else if showBack {
-                Button(action: back) {
+            } else if model.showsBack {
+                Button { model.goBack() } label: {
                     Label("Back", systemImage: "chevron.left")
                 }
                 .buttonStyle(.plain).foregroundStyle(.secondary)
@@ -54,91 +74,31 @@ struct ContentView: View {
         .padding(.vertical, 14)
     }
 
+    /// One button for every step. It stays visible when disabled so the next
+    /// action is always discoverable — previously it vanished until valid.
     @ViewBuilder private var primaryButton: some View {
         switch model.step {
-        case .platform:
-            if model.platform != nil {
-                Button("Continue", action: next)
-                    .buttonStyle(.borderedProminent).tint(Theme.accent)
-                    .keyboardShortcut(.defaultAction)
-                    .transition(.opacity)
-                    .accessibilityIdentifier("continue-button")
-            }
-        case .source:
-            Button("Continue", action: next)
-                .buttonStyle(.borderedProminent).tint(Theme.accent)
-                .keyboardShortcut(.defaultAction)
-                .disabled(!sourceValid)
-                .accessibilityIdentifier("continue-button")
-        case .options:
-            Button {
-                model.step = .usb; model.refreshDisks()
-            } label: {
-                if model.loadingCatalog {
-                    HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Loading…") }
-                } else { Text("Continue") }
-            }
-            .buttonStyle(.borderedProminent).tint(Theme.accent)
-            .keyboardShortcut(.defaultAction)
-            .disabled(!model.optionsReady)
-            .accessibilityIdentifier("continue-button")
-        case .usb:
-            Button("Create bootable USB") { model.start() }
-                .buttonStyle(.borderedProminent).tint(Theme.accent)
-                .keyboardShortcut(.defaultAction)
-                .disabled(!model.canStart)
-                .accessibilityIdentifier("create-button")
         case .progress:
-            Button("Cancel", role: .cancel) { model.cancel() }
-                .disabled(!model.running)
+            Button(model.primaryActionTitle, role: .cancel) { model.primaryAction() }
+                .disabled(!model.isPrimaryActionEnabled)
                 .accessibilityIdentifier("cancel-button")
         case .done:
-            Button("Quit") { NSApp.terminate(nil) }
+            Button(model.primaryActionTitle) { NSApp.terminate(nil) }
                 .buttonStyle(.borderedProminent).tint(Theme.accent)
                 .keyboardShortcut(.defaultAction)
                 .accessibilityIdentifier("quit-button")
-        }
-    }
-
-    private var sourceValid: Bool {
-        guard model.source == .local else { return true }   // download is always valid
-        return model.platform == .windows ? !model.localISOPath.isEmpty : !model.macAppPath.isEmpty
-    }
-
-    // MARK: Navigation
-
-    private func next() {
-        switch model.step {
-        case .platform:
-            guard model.platform != nil else { return }
-            model.catalogError = nil
-            if model.platform == .macos { model.loadInstalledMacApps() }
-            model.step = .source
-        case .source:
-            model.catalogError = nil
-            if model.source == .download {
-                model.step = .options
-            } else {
-                let path = model.platform == .windows ? model.localISOPath : model.macAppPath
-                guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else {
-                    model.catalogError = model.platform == .windows
-                        ? "Choose a valid .iso file first."
-                        : "Choose a macOS installer first."
-                    return
-                }
-                model.step = .usb; model.refreshDisks()
-            }
         default:
-            break
-        }
-    }
-
-    private func back() {
-        switch model.step {
-        case .source:  model.step = .platform
-        case .options: model.step = .source
-        case .usb:     model.step = (model.source == .download) ? .options : .source
-        default:       break
+            Button { model.primaryAction() } label: {
+                if model.step == .options, model.loadingCatalog {
+                    HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Loading…") }
+                } else {
+                    Text(model.primaryActionTitle)
+                }
+            }
+            .buttonStyle(.borderedProminent).tint(Theme.accent)
+            .keyboardShortcut(.defaultAction)
+            .disabled(!model.isPrimaryActionEnabled)
+            .accessibilityIdentifier(model.step == .usb ? "create-button" : "continue-button")
         }
     }
 }
@@ -460,17 +420,19 @@ private struct USBStep: View {
                         text: "No external drives found. Insert a USB drive (8 GB+ for Windows, 16 GB+ for macOS) and click Refresh.",
                         tint: .secondary)
             } else {
-                Picker("Drive", selection: $model.diskIndex) {
-                    ForEach(Array(model.disks.enumerated()), id: \.offset) { i, d in
-                        Text(d.label).tag(i)
+                Text("Available drives").font(.headline)
+                VStack(spacing: 8) {
+                    ForEach(Array(model.disks.enumerated()), id: \.element.id) { index, disk in
+                        DriveCard(disk: disk, selected: model.diskIndex == index) {
+                            model.diskIndex = index
+                            model.hasAcknowledgedErase = false
+                        }
                     }
                 }
-                .labelsHidden()
-                .accessibilityIdentifier("drive-picker")
-                .onChange(of: model.diskIndex) { _ in model.hasAcknowledgedErase = false }
+                .accessibilityIdentifier("drive-list")
 
                 if let drive = model.selectedDrive {
-                    EraseWarning(driveName: drive.label, acknowledged: $model.hasAcknowledgedErase)
+                    EraseWarning(drive: drive, acknowledged: $model.hasAcknowledgedErase)
                 }
 
                 if model.platform == .macos {
@@ -500,8 +462,11 @@ private struct USBStep: View {
     }
 }
 
+/// Names the drive rather than asking for a generic acknowledgement — the
+/// question that matters is "is this the right one?", not "do you know what
+/// erase means?". The warning icon is paired with text, never colour alone.
 private struct EraseWarning: View {
-    let driveName: String
+    let drive: USBDisk
     @Binding var acknowledged: Bool
 
     var body: some View {
@@ -509,19 +474,21 @@ private struct EraseWarning: View {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("This will permanently erase").font(.callout).foregroundStyle(.secondary)
-                    Text(driveName).font(.headline)
-                    Text("Everything on this drive will be destroyed.").font(.callout).foregroundStyle(.secondary)
+                    Text("\(drive.name) will be permanently erased.").font(.headline)
+                    Text("All files and partitions on this \(drive.sizeText) drive (\(drive.deviceID)) will be removed.")
+                        .font(.callout).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
             }
-            Toggle("I understand this drive will be erased", isOn: $acknowledged)
+            Toggle("I have checked that this is the correct drive.", isOn: $acknowledged)
                 .toggleStyle(.checkbox)
                 .accessibilityIdentifier("confirm-erase-toggle")
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.10)))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Warning: \(drive.name), \(drive.sizeText), \(drive.deviceID) will be permanently erased")
     }
 }
 
