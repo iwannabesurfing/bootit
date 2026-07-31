@@ -93,13 +93,17 @@ final class MacInstaller {
     private let cancel: CancelFlag
     private let onProgress: (Double, String) -> Void   // fraction 0…1 + status
     private let onLog: (String) -> Void
+    /// Coarse stage changes, for the progress checklist. Purely observational.
+    private let onPhase: (WritePhase) -> Void
 
     init(cancel: CancelFlag,
          onProgress: @escaping (Double, String) -> Void,
-         onLog: @escaping (String) -> Void) {
+         onLog: @escaping (String) -> Void,
+         onPhase: @escaping (WritePhase) -> Void = { _ in }) {
         self.cancel = cancel
         self.onProgress = onProgress
         self.onLog = onLog
+        self.onPhase = onPhase
     }
 
     // MARK: - Catalogue (static, no instance needed)
@@ -177,8 +181,10 @@ final class MacInstaller {
             throw MacInstallerError.createMediaToolMissing
         }
         try check()
+        onPhase(.preparing)
         try eraseToMac(disk)
         try check()
+        onPhase(.creatingInstaller)
         onLog("Writing the installer with createinstallmedia (this takes 10–20 minutes)…")
         try runCreateInstallMedia(tool: tool)
         onProgress(1.0, "Done")

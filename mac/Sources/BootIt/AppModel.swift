@@ -71,6 +71,11 @@ final class AppModel: ObservableObject {
     /// Nil until the user picks a drive — nothing destructive is ever preselected.
     @Published var diskIndex: Int?
     @Published var refreshingDisks = false
+    @Published var ejectError: String?
+
+    // Presentation-only disclosure state
+    @Published var showsAdvancedWindowsOptions = false
+    @Published var showsLogDetails = false
 
     // Progress
     @Published var progress: Double = 0
@@ -78,6 +83,7 @@ final class AppModel: ObservableObject {
     @Published var logText = ""
     @Published var runError: String?
     @Published var running = false
+    @Published var currentPhase: WritePhase?
 
     private let worker = DispatchQueue(label: "bootit.worker", qos: .userInitiated)
     private let cancelFlag = CancelFlag()
@@ -100,6 +106,49 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: - Main-thread helpers
+
+    // MARK: - Phases
+
+    /// The stages this build will actually run, given the platform and source.
+    var plannedPhases: [WritePhase] {
+        var phases: [WritePhase] = []
+        if source == .download { phases.append(.downloading) }
+        phases.append(.preparing)
+        if platform == .macos {
+            phases.append(.creatingInstaller)   // createinstallmedia does the rest itself
+        } else {
+            phases.append(.copying)
+            phases.append(.finalising)
+        }
+        return phases
+    }
+
+    /// Names the operating system where the phase allows it.
+    func title(for phase: WritePhase) -> String {
+        switch phase {
+        case .downloading:
+            return platform == .macos ? "Downloading macOS" : "Downloading \(osChoice.title)"
+        case .creatingInstaller:
+            return platform == .macos ? "Creating macOS installer" : phase.genericTitle
+        default:
+            return phase.genericTitle
+        }
+    }
+
+    func state(of phase: WritePhase) -> PhaseState {
+        if step == .done { return .done }
+        let planned = plannedPhases
+        guard let current = currentPhase,
+              let currentIndex = planned.firstIndex(of: current),
+              let index = planned.firstIndex(of: phase)
+        else { return .pending }
+        if index < currentIndex { return .done }
+        return index == currentIndex ? .active : .pending
+    }
+
+    private func setPhase(_ phase: WritePhase) {
+        onMain { self.currentPhase = phase }
+    }
 
     private func onMain(_ block: @escaping () -> Void) {
         if Thread.isMainThread { block() } else { DispatchQueue.main.async(execute: block) }
@@ -197,6 +246,21 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Ejects the finished drive. Safe by construction — `diskutil eject` only
+    /// unmounts a volume; it cannot alter what was written to it.
+    func eject(_ drive: USBDisk) {
+        ejectError = nil
+        worker.async { [weak self] in
+            let result = Shell.run(DiskLister.diskutil, ["eject", drive.id])
+            guard let self else { return }
+            self.onMain {
+                self.ejectError = result.ok
+                    ? nil
+                    : "Couldn't eject \(drive.name) — a file on it may still be open."
+            }
+        }
+    }
+
     // MARK: - Run
 
     /// Immutable snapshot of the UI state a build needs, captured on the main
@@ -224,6 +288,8 @@ final class AppModel: ObservableObject {
         logText = ""
         statusText = "Starting…"
         running = true
+        currentPhase = nil
+        showsLogDetails = false
         step = .progress
 
         // Snapshot UI state on the main thread before going background.
@@ -252,6 +318,7 @@ final class AppModel: ObservableObject {
         hasAcknowledgedErase = false
         isConfirmingErase = false
         progress = 0; logText = ""; runError = nil; running = false; statusText = "Starting…"
+        currentPhase = nil; showsLogDetails = false; showsAdvancedWindowsOptions = false
         editions = []; languages = []; macInstallers = []
         selectedMacGroupTitle = ""; selectedMacBuild = ""; showOlderMacBuilds = false
         localISOPath = ""; macAppPath = ""; bypassWin11 = false
@@ -277,6 +344,9 @@ final class AppModel: ObservableObject {
                 self.running = false
                 self.statusText = "Error"
                 self.runError = msg
+                // A failure is exactly when the technical detail stops being
+                // noise and starts being the thing you need.
+                self.showsLogDetails = true
                 self.log("\n❌  \(msg)")
             }
         }
@@ -288,6 +358,7 @@ final class AppModel: ObservableObject {
         let isoPath: String
         let writeBase: Double
         if request.source == .download {
+            setPhase(.downloading)
             log("Resolving download from Microsoft…")
             let cat = MicrosoftCatalog(log: { self.log($0) })
             guard let skuID = request.skuID else { throw CatalogError.noLinks }
@@ -314,8 +385,9 @@ final class AppModel: ObservableObject {
         let span = 1.0 - writeBase
         try USBWriter(
             disk: request.disk, isoPath: isoPath, cancel: cancelFlag, bypassWin11: request.bypassWin11,
-            onProgress: { frac, status in self.setProgress(writeBase + frac * span, "Writing USB…  \(status)") },
-            onLog: { self.log($0) }).write()
+            onProgress: { frac, status in self.setProgress(writeBase + frac * span, status) },
+            onLog: { self.log($0) },
+            onPhase: { self.setPhase($0) }).write()
     }
 
     // MARK: macOS pipeline
@@ -324,6 +396,7 @@ final class AppModel: ObservableObject {
         let installerApp: String
         let writeBase: Double
         if request.source == .download {
+            setPhase(.downloading)
             guard let version = request.macVersion else { throw MacInstallerError.noInstallersListed }
             let dl = MacInstaller(
                 cancel: cancelFlag,
@@ -341,7 +414,8 @@ final class AppModel: ObservableObject {
         try MacInstaller(
             cancel: cancelFlag,
             onProgress: { frac, status in self.setProgress(writeBase + frac * span, status) },
-            onLog: { self.log($0) }).write(installerAppPath: installerApp, disk: request.disk)
+            onLog: { self.log($0) },
+            onPhase: { self.setPhase($0) }).write(installerAppPath: installerApp, disk: request.disk)
     }
 
     private func check() throws {

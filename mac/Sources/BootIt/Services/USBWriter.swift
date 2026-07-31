@@ -50,6 +50,9 @@ final class USBWriter {
     /// progress reported as fraction 0…1 of the *write* phase + status text
     private let onProgress: (Double, String) -> Void
     private let onLog: (String) -> Void
+    /// Coarse stage changes, for the progress checklist. Purely observational —
+    /// nothing here influences what gets written.
+    private let onPhase: (WritePhase) -> Void
 
     private var isoMount: String?
     private var usbMount: String?
@@ -59,13 +62,15 @@ final class USBWriter {
     init(disk: String, isoPath: String, cancel: CancelFlag,
          bypassWin11: Bool = false,
          onProgress: @escaping (Double, String) -> Void,
-         onLog: @escaping (String) -> Void) {
+         onLog: @escaping (String) -> Void,
+         onPhase: @escaping (WritePhase) -> Void = { _ in }) {
         self.disk = disk
         self.iso = URL(fileURLWithPath: isoPath)
         self.cancel = cancel
         self.bypassWin11 = bypassWin11
         self.onProgress = onProgress
         self.onLog = onLog
+        self.onPhase = onPhase
     }
 
     /// Test hook: run only the copy / split / verify stages against
@@ -80,11 +85,14 @@ final class USBWriter {
 
     func write() throws {
         defer { detachISO() }
+        onPhase(.preparing)
         try check(); try mountISO()
         try check(); try erase()
         try check(); suppressSpotlight()
+        onPhase(.copying)
         try check(); try copyBase()
         try check(); try handleWIM()
+        onPhase(.finalising)
         try check(); if bypassWin11 { writeAutounattend() }
         try check(); cleanMacMetadata()
         try check(); try verify()

@@ -18,7 +18,67 @@ enum FlowDecision: Equatable {
     }
 }
 
+extension AppModel.Step {
+    /// Short label for the setup progress indicator.
+    var stageTitle: String {
+        switch self {
+        case .platform: return "Platform"
+        case .source:   return "Source"
+        case .options:  return "Options"
+        case .usb:      return "USB Drive"
+        case .progress: return "Writing"
+        case .done:     return "Done"
+        }
+    }
+}
+
 extension AppModel {
+
+    // MARK: - Page furniture
+
+    /// The stages the indicator shows for the *current route*. A local source
+    /// never visits `.options`, so listing it would promise a step that never
+    /// arrives and make the flow look longer than it is.
+    var setupStages: [Step] {
+        source == .local
+            ? [.platform, .source, .usb]
+            : [.platform, .source, .options, .usb]
+    }
+
+    /// Writing and completion replace setup navigation rather than extending it.
+    var showsSetupProgress: Bool { step != .progress && step != .done }
+
+    /// The Windows 11 bypass normally lives on the options step, which the local
+    /// route skips entirely — so on that route the drive step carries it instead.
+    /// Without this it would simply be unavailable to anyone using their own ISO.
+    var showsBypassOptionOnDriveStep: Bool {
+        platform == .windows && source == .local
+    }
+
+    private var platformName: String { platform == .macos ? "macOS" : "Windows" }
+
+    var pageTitle: String {
+        switch step {
+        case .platform: return "Create a bootable installer"
+        case .source:   return "Choose installer source"
+        case .options:  return platform == .macos ? "Choose macOS version" : "Choose Windows options"
+        case .usb:      return "Choose the USB drive to erase"
+        case .progress: return runError == nil ? "Creating \(platformName) installer" : "Something went wrong"
+        case .done:     return "Your \(platformName) installer is ready"
+        }
+    }
+
+    var pageSubtitle: String? {
+        switch step {
+        case .platform: return "Choose the operating system you want to install."
+        case .source:   return "Where would you like to get your \(platformName) installer from?"
+        case .options:  return platform == .macos
+            ? "Downloaded directly from Apple."
+            : "Select the edition and language for your installer."
+        case .usb:      return "Only external drives are shown."
+        case .progress, .done: return nil
+        }
+    }
 
     // MARK: - Derived navigation state
 
