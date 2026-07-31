@@ -6,9 +6,15 @@ installers for Windows *and* macOS** — no Boot Camp, no Windows PC, no Termina
 You pick a platform, choose a source (download from the vendor, or use a file
 you already have), pick a USB drive, and it writes a fully bootable installer.
 
-The app is a small, signed `.app` (~2.5 MB) and **self-contained**: it bundles a
-universal `wimlib` for Windows 11, and uses Apple's own `createinstallmedia` for
-macOS. Recipients need nothing else installed.
+The app is a small `.app` (~2.5 MB) and **self-contained**: it bundles `wimlib`
+for Windows 11, and uses Apple's own `createinstallmedia` for macOS. Recipients
+need nothing else installed.
+
+Requires an **Apple Silicon** Mac on macOS 13 Ventura or later — see
+[Why Apple Silicon only](#why-apple-silicon-only).
+
+**[⬇ Download the latest release](https://github.com/iwannabesurfing/bootit/releases/latest/download/BootIt.dmg)** —
+see [First launch](#first-launch-gatekeeper) for the one-time Gatekeeper step.
 
 ---
 
@@ -31,14 +37,13 @@ Both flows fully erase/format the selected USB. The internal drive is never show
 
 ## Build
 
-Requires **Xcode** (or Command Line Tools) on macOS 13 Ventura or later.
-For the Windows-11 path, install `wimlib` once on the **build** machine as the
-source to vendor from: `brew install wimlib`.
+Requires **Xcode** (or Command Line Tools) on an Apple Silicon Mac running
+macOS 13 Ventura or later. For the Windows-11 path, install `wimlib` once on the
+**build** machine as the source to vendor from: `brew install wimlib`.
 
 ```bash
 cd mac
-./build.sh            # universal (Apple Silicon + Intel)
-# or: ./build.sh --native   # this Mac's architecture only (faster)
+./build.sh
 ```
 
 Output: `mac/dist/BootIt.app`
@@ -48,8 +53,21 @@ open "dist/BootIt.app"            # test it
 cp -R "dist/BootIt.app" /Applications/   # install
 ```
 
-`build.sh` runs `vendor-wimlib.sh`, which bundles a **universal** `wimlib` into
+`build.sh` runs `vendor-wimlib.sh`, which bundles `wimlib` into
 `Contents/Resources/wimlib/` (re-pathed to load relative to the app and signed).
+`package.sh` refuses to build a DMG unless every binary in the bundle is arm64,
+so a wrong-architecture build can't reach users.
+
+### Why Apple Silicon only
+
+Intel Macs ship with **Boot Camp Assistant**, which already creates Windows USB
+installers natively. Apple Silicon Macs don't — that gap is the reason this app
+exists, so Intel is not a target.
+
+The practical trigger was Homebrew dropping its x86_64 `wimlib` bottle (only
+`arm64_tahoe` is published now), which made a universal build impossible without
+compiling wimlib from source or adding an Intel CI runner. Releases up to
+**v3.0.0** are universal and still work on Intel.
 
 ### Tests & linting
 
@@ -104,31 +122,85 @@ password prompt; it does not store or handle your password.
 
 ## Distributing to other Mac users
 
-The app is unsigned (it's free — sharing the app is the same as sharing the
-repo), so Gatekeeper blocks the first launch. Recipients do this **once**:
+```bash
+cd mac
+./build.sh          # dist/BootIt.app
+./package.sh        # dist/BootIt.dmg
+```
+
+`package.sh` builds the drag-to-Applications DMG that ships on the
+[Releases](https://github.com/iwannabesurfing/bootit/releases) page. It also
+signs, notarises and staples when credentials are present — see below.
+
+### First launch (Gatekeeper)
+
+Builds made with the credentials below are **signed and notarised**, so they
+open normally with no warning.
+
+A build made without them is ad-hoc signed, and Gatekeeper blocks its first
+launch. Recipients then have to do this **once**:
 
 > System Settings → Privacy & Security → **Open Anyway**
 
-(macOS Sequoia 15+ removed the old right-click → Open shortcut for unsigned
-apps, so the Open Anyway button in Settings is now the only path.)
+(macOS Sequoia 15+ removed the old right-click → Open shortcut, so the Open
+Anyway button in Settings is now the only path.)
+
+Releases up to and including **v3.0.0** are ad-hoc signed and need that step.
+
+### Signing + notarising (removes the Gatekeeper warning)
+
+Both scripts pick up signing from the environment; with nothing set they fall
+back to ad-hoc and still produce a working app and DMG.
 
 ```bash
-cd mac
-ditto -c -k --keepParent "dist/BootIt.app" "BootIt.zip"
+export BOOTIT_SIGN_ID="Developer ID Application: LEME Digital (MD4M4DL5PP)"
+export BOOTIT_NOTARY_PROFILE="bootit-notary"
+
+./build.sh          # Developer ID + hardened runtime + secure timestamp
+./package.sh        # notarises and staples the app, then the DMG
 ```
 
-### Optional: sign + notarise (removes the Gatekeeper warning)
+One-time setup on the signing machine:
 
 ```bash
-codesign --deep --force --options runtime \
-  --sign "Developer ID Application: YOUR NAME (TEAM_ID)" \
-  "dist/BootIt.app"
+# 1. Create a Developer ID Application certificate (Account Holder only):
+#    Xcode ▸ Settings ▸ Accounts ▸ Manage Certificates ▸ + ▸ Developer ID Application
+#    (or developer.apple.com ▸ Certificates ▸ +)
 
-xcrun notarytool submit "BootIt.zip" \
-  --apple-id you@example.com --team-id TEAM_ID \
-  --password APP_SPECIFIC_PASSWORD --wait
-xcrun stapler staple "dist/BootIt.app"
+# 2. Store notarisation credentials in the keychain:
+xcrun notarytool store-credentials "bootit-notary" \
+  --apple-id you@example.com --team-id MD4M4DL5PP \
+  --password APP_SPECIFIC_PASSWORD
 ```
+
+Verify a finished build:
+
+```bash
+spctl -a -vv dist/BootIt.app                                     # accepted, Developer ID
+spctl -a -t open --context context:primary-signature -v dist/BootIt.dmg
+```
+
+### Releasing
+
+Tagging a version builds and publishes the DMG automatically
+([`.github/workflows/release.yml`](.github/workflows/release.yml)):
+
+```bash
+git tag v3.1.0 && git push origin v3.1.0
+```
+
+The workflow refuses to run if the tag and `mac/Info.plist`'s
+`CFBundleShortVersionString` disagree. It signs and notarises when the repo
+secrets below exist, and falls back to an ad-hoc DMG when they don't:
+
+| Secret | What it is |
+|--------|------------|
+| `MACOS_CERT_P12` | Developer ID Application cert + key, `.p12`, base64-encoded |
+| `MACOS_CERT_PASSWORD` | Password used when exporting that `.p12` |
+| `MACOS_SIGN_ID` | e.g. `Developer ID Application: LEME Digital (MD4M4DL5PP)` |
+| `MACOS_NOTARY_KEY_P8` | App Store Connect API key (`AuthKey_XXXXXXXX.p8`), base64-encoded |
+| `MACOS_NOTARY_KEY_ID` | The key ID — the `XXXXXXXX` in that filename |
+| `MACOS_NOTARY_ISSUER_ID` | Issuer UUID from App Store Connect ▸ Users and Access ▸ Integrations |
 
 ---
 
@@ -143,8 +215,8 @@ ISO file** — that path always works.
 
 ## Roadmap
 
-- A code-signed, notarised release build (drops the right-click-to-open step)
-- App icon
+Nothing outstanding. Signing, notarisation and tagged releases are all in place
+as of v3.1.0; v3.0.0 predates them and still needs the Open Anyway step.
 
 ---
 

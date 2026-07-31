@@ -28,22 +28,21 @@ fi
 echo "✅  $(swift --version 2>/dev/null | head -1)"
 
 # ── Build ──────────────────────────────────────────────────────────────────
-ARCH_ARGS="--arch arm64 --arch x86_64"
-if [[ "${1:-}" == "--native" ]]; then ARCH_ARGS=""; fi
+# Apple Silicon only, deliberately: Intel Macs already have Boot Camp Assistant,
+# which is exactly what this app replaces. See "Why Apple Silicon only" in the
+# README before making this universal again.
+ARCH_ARGS="--arch arm64"
+
+if [[ "${1:-}" == "--native" ]]; then
+    echo "ℹ️  --native is no longer needed — builds are arm64-only."
+fi
 
 echo ""
-echo "🔨  Compiling (release)…"
-if ! swift build -c release $ARCH_ARGS 2>/tmp/wmc_build.log; then
-    if [[ -n "$ARCH_ARGS" ]]; then
-        echo "⚠️  Universal build failed — falling back to native arch."
-        cat /tmp/wmc_build.log | tail -5
-        ARCH_ARGS=""
-        swift build -c release
-    else
-        cat /tmp/wmc_build.log | tail -20
-        echo "❌  Build failed."
-        exit 1
-    fi
+echo "🔨  Compiling (release, arm64)…"
+if ! swift build -c release $ARCH_ARGS 2>/tmp/bootit_build.log; then
+    tail -20 /tmp/bootit_build.log
+    echo "❌  Build failed."
+    exit 1
 fi
 
 BIN_PATH="$(swift build -c release $ARCH_ARGS --show-bin-path)/$BIN_NAME"
@@ -72,16 +71,42 @@ else
     echo "⚠️  Could not vendor wimlib — Windows 11 will need a Homebrew wimlib on the user's Mac."
 fi
 
-# ── Ad-hoc sign (inner Mach-O first, then seal the app) ──────────────────────
-echo "🔏  Ad-hoc code signing…"
+# ── Code sign (inner Mach-O first, then seal the app) ────────────────────────
+# BOOTIT_SIGN_ID = a "Developer ID Application: …" identity → real signature with
+# the hardened runtime and a secure timestamp, which is what notarisation needs.
+# Unset → ad-hoc, which runs locally but leaves Gatekeeper blocking other Macs.
+SIGN_ID="${BOOTIT_SIGN_ID:-}"
 WIMDIR="$APP_DIR/Contents/Resources/wimlib"
+
+if [[ -n "$SIGN_ID" ]]; then
+    echo "🔏  Signing with: $SIGN_ID"
+    SIGN_ARGS=(--force --options runtime --timestamp --sign "$SIGN_ID")
+else
+    echo "🔏  Ad-hoc code signing (set BOOTIT_SIGN_ID for a Developer ID build)…"
+    SIGN_ARGS=(--force --sign -)
+fi
+
+sign_one() {   # a failed Developer ID signature is fatal; a failed ad-hoc one isn't
+    if [[ -n "$SIGN_ID" ]]; then
+        codesign "${SIGN_ARGS[@]}" "$1"
+    else
+        codesign "${SIGN_ARGS[@]}" "$1" 2>/dev/null || \
+            echo "   (codesign skipped for $(basename "$1") — app will still run)"
+    fi
+}
+
 if [[ -d "$WIMDIR" ]]; then
     for f in "$WIMDIR"/libwim.*.dylib "$WIMDIR/wimlib-imagex"; do
-        [[ -f "$f" ]] && codesign --force --sign - "$f" 2>/dev/null || true
+        [[ -f "$f" ]] && sign_one "$f"
     done
 fi
-codesign --force --sign - "$APP_DIR" 2>/dev/null || \
-    echo "   (codesign skipped — app will still run)"
+sign_one "$APP_DIR"
+
+if [[ -n "$SIGN_ID" ]]; then
+    codesign --verify --strict --deep --verbose=1 "$APP_DIR"
+    echo "   Signature verified. (spctl will still reject it until it's notarised —"
+    echo "    run ./package.sh with BOOTIT_NOTARY_PROFILE set.)"
+fi
 
 SIZE=$(du -sh "$APP_DIR" | awk '{print $1}')
 echo ""
@@ -95,8 +120,10 @@ echo ""
 echo "Next steps:"
 echo "  • Test:        open \"$APP_DIR\""
 echo "  • Install:     cp -R \"$APP_DIR\" /Applications/"
-echo "  • Distribute:  ditto -c -k --keepParent \"$APP_DIR\" \"${APP_NAME}.zip\""
+echo "  • Distribute:  ./package.sh          # builds dist/${APP_NAME}.dmg"
 echo ""
-echo "⚠️  On other Macs (unsigned app), recipients open it once via:"
-echo "   System Settings → Privacy & Security → Open Anyway"
-echo "   (macOS 15+ removed the old right-click → Open shortcut for unsigned apps.)"
+if [[ -z "$SIGN_ID" ]]; then
+    echo "⚠️  Ad-hoc signed — on other Macs recipients open it once via:"
+    echo "   System Settings → Privacy & Security → Open Anyway"
+    echo "   (macOS 15+ removed the old right-click → Open shortcut.)"
+fi

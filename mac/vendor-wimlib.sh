@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# vendor-wimlib.sh — Produce a self-contained, ideally universal wimlib in
-# vendor/wimlib/ that loads relative to its own binary (@executable_path), so it
-# can be dropped into the .app and run with no Homebrew on the user's machine.
+# vendor-wimlib.sh — Produce a self-contained arm64 wimlib in vendor/wimlib/
+# that loads relative to its own binary (@executable_path), so it can be dropped
+# into the .app and run with no Homebrew on the user's machine.
 #
 # Output: vendor/wimlib/{wimlib-imagex, libwim.<n>.dylib}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -27,42 +27,22 @@ NATIVE_BIN="$PREFIX/bin/wimlib-imagex"
 # Derive the exact dylib name the binary references (e.g. libwim.15.dylib).
 LIBNAME="$(basename "$(otool -L "$NATIVE_BIN" | awk '/libwim/{print $1; exit}')")"
 NATIVE_LIB="$PREFIX/lib/$LIBNAME"
-HOSTARCH="$(uname -m)"
-OTHERARCH=$([[ "$HOSTARCH" == "arm64" ]] && echo x86_64 || echo arm64)
 
-rm -rf "$OUT" vendor/.other
+rm -rf "$OUT"
 mkdir -p "$OUT"
 
-echo "📥  Native wimlib ($HOSTARCH): $PREFIX"
-
-# ── Try to obtain the other architecture for a universal binary ──────────────
-OTHER_BIN=""; OTHER_LIB=""
-for CODENAME in tahoe sequoia sonoma ventura; do
-    TAG="${OTHERARCH}_${CODENAME}"
-    if brew fetch --force --bottle-tag="$TAG" wimlib >/dev/null 2>&1; then
-        CACHE="$(brew --cache --bottle-tag="$TAG" wimlib 2>/dev/null || true)"
-        if [[ -f "$CACHE" ]]; then
-            mkdir -p vendor/.other
-            tar -xzf "$CACHE" -C vendor/.other 2>/dev/null || continue
-            OTHER_BIN="$(find vendor/.other -name wimlib-imagex 2>/dev/null | head -1)"
-            OTHER_LIB="$(find vendor/.other -name "$LIBNAME" 2>/dev/null | head -1)"
-            [[ -n "$OTHER_BIN" && -n "$OTHER_LIB" ]] && break
-        fi
-    fi
-done
-
-if [[ -n "$OTHER_BIN" && -n "$OTHER_LIB" ]]; then
-    echo "🔗  Building universal wimlib ($HOSTARCH + $OTHERARCH)…"
-    lipo -create "$NATIVE_BIN" "$OTHER_BIN" -output "$OUT/wimlib-imagex"
-    lipo -create "$NATIVE_LIB" "$OTHER_LIB" -output "$OUT/$LIBNAME"
-else
-    echo "⚠️  Could not fetch the $OTHERARCH build — bundling $HOSTARCH only."
-    echo "    (App will be self-contained on $HOSTARCH Macs; the other arch would need brew.)"
-    cp "$NATIVE_BIN" "$OUT/wimlib-imagex"
-    cp "$NATIVE_LIB" "$OUT/$LIBNAME"
-fi
-rm -rf vendor/.other
+echo "📥  wimlib: $PREFIX"
+cp "$NATIVE_BIN" "$OUT/wimlib-imagex"
+cp "$NATIVE_LIB" "$OUT/$LIBNAME"
 chmod +x "$OUT/wimlib-imagex" "$OUT/$LIBNAME"
+
+# BootIt is arm64-only, so the vendored copy has to be too. An x86_64 wimlib
+# here would build cleanly and then fail to launch on every user's Mac.
+ARCHS="$(lipo -archs "$OUT/wimlib-imagex")"
+if [[ "$ARCHS" != *arm64* ]]; then
+    echo "❌  Homebrew's wimlib is '$ARCHS', not arm64 — build on an Apple Silicon Mac."
+    exit 1
+fi
 
 # ── Re-path so the binary loads the dylib sitting next to it ─────────────────
 install_name_tool -id "@executable_path/$LIBNAME" "$OUT/$LIBNAME"

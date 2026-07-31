@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:      # dry run — builds and uploads an artifact, publishes nothing
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build, sign & publish DMG
+    runs-on: macos-15
+    # Job-level so the `if:` on the signing steps can read them. Absent secrets
+    # resolve to "", which makes build.sh/package.sh fall back to an ad-hoc DMG.
+    env:
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      MACOS_SIGN_ID: ${{ secrets.MACOS_SIGN_ID }}
+      MACOS_NOTARY_KEY_P8: ${{ secrets.MACOS_NOTARY_KEY_P8 }}
+      MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+      MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the tag matches Info.plist
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          PLIST_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' mac/Info.plist)"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$PLIST_VERSION" != "$TAG_VERSION" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME says $TAG_VERSION but mac/Info.plist says $PLIST_VERSION."
+            exit 1
+          fi
+          echo "Version $PLIST_VERSION ✓"
+
+      - name: Install wimlib (source for the vendored copy)
+        run: brew install wimlib
+
+      - name: Write notarisation API key
+        if: env.MACOS_NOTARY_KEY_P8 != ''
+        run: |
+          printf '%s' "$MACOS_NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          chmod 600 "$RUNNER_TEMP/notary.p8"
+
+      - name: Import Developer ID certificate
+        if: env.MACOS_CERT_P12 != ''
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/build.keychain"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+      - name: Build (universal)
+        working-directory: mac
+        env:
+          BOOTIT_SIGN_ID: ${{ env.MACOS_SIGN_ID }}
+        run: ./build.sh
+
+      - name: Package DMG (notarised when credentials exist)
+        working-directory: mac
+        env:
+          BOOTIT_SIGN_ID: ${{ env.MACOS_SIGN_ID }}
+          BOOTIT_NOTARY_KEY: ${{ env.MACOS_NOTARY_KEY_P8 != '' && format('{0}/notary.p8', runner.temp) || '' }}
+          BOOTIT_NOTARY_KEY_ID: ${{ env.MACOS_NOTARY_KEY_ID }}
+          BOOTIT_NOTARY_ISSUER: ${{ env.MACOS_NOTARY_ISSUER_ID }}
+        run: ./package.sh
+
+      - name: Upload DMG as a workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: BootIt-dmg
+          path: mac/dist/BootIt.dmg
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" mac/dist/BootIt.dmg \
+            --title "BootIt $GITHUB_REF_NAME" \
+            --generate-notes

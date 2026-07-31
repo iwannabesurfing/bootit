@@ -11,7 +11,9 @@ final class AppModel: ObservableObject {
         case windows, macos
         var id: String { rawValue }
         var title: String { self == .windows ? "Windows" : "macOS" }
-        var subtitle: String { self == .windows ? "Windows 10 or 11" : "Ventura – Tahoe" }
+        // Kept version-agnostic on purpose: the macOS list comes live from
+        // `softwareupdate`, so naming the newest release here would go stale.
+        var subtitle: String { self == .windows ? "Windows 10 or 11" : "Ventura or later" }
         var symbol: String { self == .windows ? "pc" : "apple.logo" }
     }
 
