@@ -66,7 +66,7 @@ jobs:
           rm -f "$RUNNER_TEMP/cert.p12"
           security find-identity -v -p codesigning "$KEYCHAIN"
 
-      - name: Build (universal)
+      - name: Build (arm64)
         working-directory: mac
         env:
           BOOTIT_SIGN_ID: ${{ env.MACOS_SIGN_ID }}
