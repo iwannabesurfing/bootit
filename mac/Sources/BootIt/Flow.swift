@@ -106,9 +106,39 @@ extension AppModel {
         switch step {
         case .platform, .source, .options: return "Continue"
         case .usb:      return "Erase and Create Installer"
-        case .progress: return "Cancel"
+        // Once a build has stopped there is nothing left to cancel, and leaving
+        // a dead Cancel button as the only action strands the user.
+        case .progress: return runError == nil ? "Cancel" : "Start Over"
         case .done:     return "Quit"
         }
+    }
+
+    /// Plain-language guidance for the failures worth recognising. Nil when the
+    /// underlying message already says everything useful — a generic "try again"
+    /// is worse than no hint at all.
+    var recoveryHint: String? {
+        guard let error = runError?.lowercased() else { return nil }
+
+        if error.contains("-69850") || error.contains("chosen size is not valid") {
+            return "That drive still carries a bootable partition layout from a previous use, "
+                 + "which macOS won't erase in place. BootIt now rewrites the whole partition "
+                 + "scheme automatically, so try again. If it fails a second time, erase the "
+                 + "drive once in Disk Utility using GUID Partition Map, then retry."
+        }
+        if error.contains("rate") || error.contains("anti-bot") || error.contains("rejected") {
+            return "Microsoft rate-limits download links per IP address. Wait 10–15 minutes, "
+                 + "turn off any VPN, or switch to “Use an existing ISO file”, which never "
+                 + "touches their servers."
+        }
+        if error.contains("authorisation") || error.contains("authorization") {
+            return "Creating a macOS installer needs an administrator password. Try again and "
+                 + "approve the prompt when it appears."
+        }
+        if error.contains("no space") || error.contains("not enough") {
+            return "The drive is too small for this installer. Windows needs 8 GB or more, "
+                 + "macOS 16 GB or more."
+        }
+        return nil
     }
 
     /// Whether the primary button is enabled. It stays *visible* when disabled,
@@ -119,7 +149,7 @@ extension AppModel {
         case .source:   return isSourceValid
         case .options:  return optionsReady
         case .usb:      return canStart
-        case .progress: return running
+        case .progress: return running || runError != nil
         case .done:     return true
         }
     }
@@ -179,7 +209,8 @@ extension AppModel {
     /// to handle — quitting is an AppKit call this layer deliberately avoids.
     func primaryAction() {
         switch step {
-        case .progress: cancel()
+        case .progress:
+            if runError == nil { cancel() } else { reset() }
         case .done:     break
         default:        apply(flowDecision())
         }

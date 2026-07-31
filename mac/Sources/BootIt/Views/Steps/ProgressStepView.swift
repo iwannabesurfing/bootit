@@ -6,41 +6,41 @@ struct ProgressStepView: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 18) {
             if let error = model.runError {
                 StatusBanner(.error, title: "The build stopped", message: error)
-            } else {
-                progressHeader
-            }
-
-            phaseChecklist
-
-            logSection
-
-            if model.runError != nil {
+                if let hint = model.recoveryHint {
+                    StatusBanner(.information, title: "What to try", message: hint)
+                }
+                phaseChecklist
                 HStack(spacing: 10) {
                     Button("Copy Diagnostics", action: copyDiagnostics)
                         .accessibilityIdentifier("copy-diagnostics-button")
-                    Button("Start Over") { model.reset() }
-                        .accessibilityIdentifier("start-over-button")
+                    Button("Try Again") { model.start() }
+                        .disabled(model.selectedDrive == nil)
+                        .accessibilityIdentifier("try-again-button")
                 }
+            } else {
+                runningHeader
             }
+
+            logSection
         }
     }
 
-    private var progressHeader: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ProgressView(value: model.progress)
-                .tint(Theme.accent)
-                .accessibilityLabel("Overall progress")
-                .accessibilityValue("\(Int(model.progress * 100)) percent")
-            HStack {
-                Text(model.statusText).font(.callout).foregroundStyle(.secondary)
-                Spacer()
-                Text("\(Int(model.progress * 100))%")
-                    .font(.callout.monospacedDigit())
+    /// The ring and the checklist sit side by side: one answers "how far along",
+    /// the other "doing what". A bar alone left the window mostly empty.
+    private var runningHeader: some View {
+        HStack(alignment: .center, spacing: 26) {
+            ProgressRing(value: model.progress)
+            VStack(alignment: .leading, spacing: 12) {
+                Text(model.statusText)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                phaseChecklist
             }
+            Spacer(minLength: 0)
         }
     }
 
@@ -51,7 +51,7 @@ struct ProgressStepView: View {
                 HStack(spacing: 9) {
                     marker(state)
                     Text(model.title(for: phase))
-                        .font(.callout.weight(state == .active ? .semibold : .regular))
+                        .font(.callout.weight(state == .active || state == .failed ? .semibold : .regular))
                         .foregroundStyle(state == .pending ? Color.secondary : Color.primary)
                     Spacer(minLength: 0)
                 }
@@ -75,6 +75,9 @@ struct ProgressStepView: View {
                 .foregroundStyle(Theme.accent)
                 .font(.system(size: 10))
                 .frame(width: 16)
+        case .failed:
+            Image(systemName: "xmark.circle.fill")
+                .foregroundStyle(.red)
         case .pending:
             Image(systemName: "circle")
                 .foregroundStyle(Color.secondary.opacity(0.4))
@@ -87,6 +90,7 @@ struct ProgressStepView: View {
         switch state {
         case .done:    return "Completed"
         case .active:  return "In progress"
+        case .failed:  return "Failed"
         case .pending: return "Not started"
         }
     }
@@ -104,6 +108,7 @@ struct ProgressStepView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(Theme.accent)
+            .keyboardShortcut("l", modifiers: .command)
             .accessibilityIdentifier("toggle-log-button")
 
             if model.showsLogDetails {

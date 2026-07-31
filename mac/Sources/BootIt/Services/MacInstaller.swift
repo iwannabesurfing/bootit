@@ -195,8 +195,25 @@ final class MacInstaller {
         onLog("Erasing \(disk) → Mac OS Extended (Journaled) / GPT…")
         onProgress(0.02, "Erasing USB…")
         Shell.run(Self.diskutil, ["unmountDisk", "force", disk])
-        let r = Shell.run(Self.diskutil, ["eraseDisk", "JHFS+", Self.eraseName, "GPT", disk])
-        guard r.ok else { throw MacInstallerError.eraseFailed(r.err.isEmpty ? r.out : r.err) }
+
+        let erase = Shell.run(Self.diskutil, ["eraseDisk", "JHFS+", Self.eraseName, "GPT", disk])
+        if !erase.ok {
+            // `eraseDisk` keeps the existing partition scheme, which fails with
+            // -69850 ("chosen size is not valid") on drives that already carry a
+            // bootable or cloned layout — including one BootIt itself wrote
+            // earlier. `partitionDisk` replaces the scheme outright, so it gets
+            // past exactly the case a retry of the same command cannot.
+            onLog("Erase failed; rewriting the partition scheme and retrying…")
+            Shell.run(Self.diskutil, ["unmountDisk", "force", disk])
+            let repartition = Shell.run(
+                Self.diskutil, ["partitionDisk", disk, "GPT", "JHFS+", Self.eraseName, "100%"])
+            guard repartition.ok else {
+                let detail = [erase.err.isEmpty ? erase.out : erase.err,
+                              repartition.err.isEmpty ? repartition.out : repartition.err]
+                    .filter { !$0.isEmpty }.joined(separator: "\n")
+                throw MacInstallerError.eraseFailed(detail)
+            }
+        }
         onLog("Formatted.")
         onProgress(0.05, "Formatted")
     }

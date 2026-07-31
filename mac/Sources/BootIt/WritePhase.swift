@@ -42,5 +42,8 @@ enum WritePhase: String, CaseIterable, Identifiable {
 enum PhaseState {
     case done
     case active
+    /// The phase that was running when the build stopped. Without this the
+    /// checklist shows a failed stage as still in progress.
+    case failed
     case pending
 }

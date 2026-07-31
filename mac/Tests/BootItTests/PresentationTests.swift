@@ -185,3 +185,72 @@ final class PresentationTests: XCTestCase {
         XCTAssertFalse(model.showsAdvancedWindowsOptions)
     }
 }
+
+/// Behaviour that only shows up once a build has failed — every case here was
+/// found by looking at a real failure screenshot, not by reading the code.
+final class FailureStateTests: XCTestCase {
+
+    private func failed(_ error: String, phase: WritePhase = .preparing) -> AppModel {
+        let model = AppModel()
+        model.platform = .macos
+        model.source = .download
+        model.step = .progress
+        model.currentPhase = phase
+        model.runError = error
+        model.running = false
+        return model
+    }
+
+    /// The checklist showed the phase that failed as an orange "in progress"
+    /// dot, so a stopped build looked like it was still working.
+    func testTheFailingPhaseReadsAsFailedNotActive() {
+        let model = failed("Failed to format the USB drive")
+        XCTAssertEqual(model.state(of: .downloading), .done)
+        XCTAssertEqual(model.state(of: .preparing), .failed)
+        XCTAssertEqual(model.state(of: .creatingInstaller), .pending)
+    }
+
+    /// The footer offered a disabled Cancel and nothing else, so a failed build
+    /// left the primary action dead.
+    func testFailureReplacesCancelWithAWorkingAction() {
+        let running = AppModel()
+        running.step = .progress
+        running.running = true
+        XCTAssertEqual(running.primaryActionTitle, "Cancel")
+        XCTAssertTrue(running.isPrimaryActionEnabled)
+
+        let stopped = failed("Failed to format the USB drive")
+        XCTAssertEqual(stopped.primaryActionTitle, "Start Over")
+        XCTAssertTrue(stopped.isPrimaryActionEnabled, "the only action must not be dead")
+
+        stopped.primaryAction()
+        XCTAssertEqual(stopped.step, .platform)
+        XCTAssertNil(stopped.runError)
+    }
+
+    func testDiskutilSizeErrorExplainsTheBootablePartitionCause() throws {
+        let model = failed("Failed to format the USB drive:\n"
+                         + "Error: -69850: The chosen size is not valid for the chosen file system")
+        let hint = try XCTUnwrap(model.recoveryHint)
+        XCTAssertTrue(hint.contains("bootable partition layout"))
+        XCTAssertTrue(hint.contains("Disk Utility"))
+    }
+
+    func testMicrosoftRateLimitPointsAtTheLocalISOPath() {
+        let model = failed("Microsoft rejected the request (anti-bot).")
+        XCTAssertTrue(model.recoveryHint?.contains("existing ISO") ?? false)
+    }
+
+    /// An unrecognised failure gets no hint — inventing generic advice for an
+    /// error we don't understand is worse than staying quiet.
+    func testUnknownFailuresGetNoInventedAdvice() {
+        XCTAssertNil(failed("wimlib exited with status 137").recoveryHint)
+    }
+
+    func testNoHintWhileHealthy() {
+        let model = AppModel()
+        model.step = .progress
+        model.running = true
+        XCTAssertNil(model.recoveryHint)
+    }
+}

@@ -199,8 +199,23 @@ final class USBWriter {
         // ("No OS found"). MBR yields a single FAT32 partition with no ESP for
         // Setup to hijack, and is still UEFI-bootable for removable install media
         // via the \EFI\BOOT\BOOTX64.EFI fallback path.
-        let r = Shell.run(Self.diskutil, ["eraseDisk", "MS-DOS", Self.volName, "MBR", disk])
-        guard r.ok else { throw WriterError.eraseFailed(r.err.isEmpty ? r.out : r.err) }
+        let erase = Shell.run(Self.diskutil, ["eraseDisk", "MS-DOS", Self.volName, "MBR", disk])
+        if !erase.ok {
+            // Same failure mode as the macOS path: `eraseDisk` reuses the existing
+            // partition scheme and fails with -69850 on a drive that already holds
+            // a bootable layout. `partitionDisk` replaces the scheme, keeping MBR
+            // for the reason above.
+            onLog("Erase failed; rewriting the partition scheme and retrying…")
+            Shell.run(Self.diskutil, ["unmountDisk", "force", disk])
+            let repartition = Shell.run(
+                Self.diskutil, ["partitionDisk", disk, "MBR", "MS-DOS", Self.volName, "100%"])
+            guard repartition.ok else {
+                let detail = [erase.err.isEmpty ? erase.out : erase.err,
+                              repartition.err.isEmpty ? repartition.out : repartition.err]
+                    .filter { !$0.isEmpty }.joined(separator: "\n")
+                throw WriterError.eraseFailed(detail)
+            }
+        }
         let mount = try findUSBMount()
         usbMount = mount
         onLog("Formatted. USB mounted at \(mount)")

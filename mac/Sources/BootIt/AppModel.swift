@@ -143,7 +143,8 @@ final class AppModel: ObservableObject {
               let index = planned.firstIndex(of: phase)
         else { return .pending }
         if index < currentIndex { return .done }
-        return index == currentIndex ? .active : .pending
+        guard index == currentIndex else { return .pending }
+        return runError == nil ? .active : .failed
     }
 
     private func setPhase(_ phase: WritePhase) {

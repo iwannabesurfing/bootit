@@ -78,17 +78,9 @@ struct RootView: View {
                 .accessibilityIdentifier("refresh-disks-button")
             }
 
-            if model.step == .progress {
-                Button {
-                    model.showsLogDetails.toggle()
-                } label: {
-                    Label(model.showsLogDetails ? "Hide Details" : "Show Details",
-                          systemImage: "text.alignleft")
-                }
-                .help("Show the technical log")
-                .keyboardShortcut("l", modifiers: .command)
-            }
-
+            // No log toggle here: as a bare icon it read as a hamburger menu, and
+            // it duplicated the labelled disclosure already in the content. The
+            // shortcut lives on that control instead.
             if model.showsSetupProgress && model.step != .platform {
                 Button("Start Over") { model.reset() }
                     .help("Discard these choices and begin again")
