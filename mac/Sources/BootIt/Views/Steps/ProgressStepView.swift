@@ -143,3 +143,30 @@ struct ProgressStepView: View {
         NSPasteboard.general.setString(report, forType: .string)
     }
 }
+
+#if DEBUG
+#Preview("Starting") {
+    ProgressStepView().environmentObject(PreviewModel.writing(progress: 0.02, phase: .downloading))
+        .padding().frame(width: 560)
+}
+
+#Preview("Mid-write") {
+    ProgressStepView().environmentObject(PreviewModel.writing(progress: 0.42, phase: .copying))
+        .padding().frame(width: 560)
+}
+
+#Preview("Mid-write, log open") {
+    ProgressStepView()
+        .environmentObject(PreviewModel.writing(progress: 0.42, phase: .copying, showingLog: true))
+        .padding().frame(width: 560)
+}
+
+#Preview("Failure") {
+    ProgressStepView().environmentObject(PreviewModel.failed()).padding().frame(width: 560)
+}
+
+#Preview("Failure — dark") {
+    ProgressStepView().environmentObject(PreviewModel.failed())
+        .padding().frame(width: 560).preferredColorScheme(.dark)
+}
+#endif

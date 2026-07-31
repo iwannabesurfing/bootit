@@ -74,3 +74,17 @@ struct StepIndicator: View {
         return index == currentIndex ? .current : .upcoming
     }
 }
+
+#if DEBUG
+#Preview("Download route — on Options") {
+    StepIndicator(stages: [.platform, .source, .options, .usb], current: .options)
+        .padding()
+        .frame(width: 520)
+}
+
+#Preview("Local route — three stages") {
+    StepIndicator(stages: [.platform, .source, .usb], current: .source)
+        .padding()
+        .frame(width: 520)
+}
+#endif

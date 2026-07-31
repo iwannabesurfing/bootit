@@ -68,3 +68,18 @@ extension AppModel.Platform {
                          : "Create an installer for a compatible Mac"
     }
 }
+
+#if DEBUG
+#Preview("Nothing selected") {
+    PlatformStepView().environmentObject(PreviewModel.platform(nil)).padding().frame(width: 560)
+}
+
+#Preview("Windows selected") {
+    PlatformStepView().environmentObject(PreviewModel.platform(.windows)).padding().frame(width: 560)
+}
+
+#Preview("macOS selected — dark") {
+    PlatformStepView().environmentObject(PreviewModel.platform(.macos))
+        .padding().frame(width: 560).preferredColorScheme(.dark)
+}
+#endif

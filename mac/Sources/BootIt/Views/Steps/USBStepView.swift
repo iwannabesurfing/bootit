@@ -89,3 +89,32 @@ struct EraseWarning: View {
         .background(RoundedRectangle(cornerRadius: Theme.smallRadius).fill(Color.orange.opacity(0.10)))
     }
 }
+
+#if DEBUG
+#Preview("No drives") {
+    USBStepView().environmentObject(PreviewModel.drives([])).padding().frame(width: 560)
+}
+
+#Preview("Drives, none selected") {
+    USBStepView().environmentObject(PreviewModel.drives()).padding().frame(width: 560)
+}
+
+#Preview("Selected, not acknowledged") {
+    USBStepView().environmentObject(PreviewModel.drives(selected: 0)).padding().frame(width: 560)
+}
+
+#Preview("Selected and acknowledged") {
+    USBStepView().environmentObject(PreviewModel.drives(selected: 0, acknowledged: true))
+        .padding().frame(width: 560)
+}
+
+#Preview("Local ISO — bypass offered here") {
+    USBStepView().environmentObject(PreviewModel.drives(selected: 0, source: .local))
+        .padding().frame(width: 560)
+}
+
+#Preview("Selected — dark") {
+    USBStepView().environmentObject(PreviewModel.drives(selected: 0, acknowledged: true))
+        .padding().frame(width: 560).preferredColorScheme(.dark)
+}
+#endif

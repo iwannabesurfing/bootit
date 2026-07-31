@@ -81,3 +81,19 @@ struct CompletionStepView: View {
         return parts.joined(separator: "  ·  ")
     }
 }
+
+#if DEBUG
+#Preview("Windows complete") {
+    CompletionStepView().environmentObject(PreviewModel.completed()).padding().frame(width: 560)
+}
+
+#Preview("macOS complete") {
+    CompletionStepView().environmentObject(PreviewModel.completed(platform: .macos))
+        .padding().frame(width: 560)
+}
+
+#Preview("Windows complete — dark") {
+    CompletionStepView().environmentObject(PreviewModel.completed())
+        .padding().frame(width: 560).preferredColorScheme(.dark)
+}
+#endif

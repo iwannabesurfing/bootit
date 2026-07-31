@@ -215,3 +215,29 @@ struct OptionsStepView: View {
         .accessibilityValue(selected ? "Selected" : "Not selected")
     }
 }
+
+#if DEBUG
+#Preview("Windows options") {
+    OptionsStepView().environmentObject(PreviewModel.windowsOptions()).padding().frame(width: 560)
+}
+
+#Preview("Windows — catalogue loading") {
+    OptionsStepView().environmentObject(PreviewModel.windowsOptions(loading: true))
+        .padding().frame(width: 560)
+}
+
+#Preview("Windows — catalogue error") {
+    OptionsStepView()
+        .environmentObject(PreviewModel.windowsOptions(error: "Microsoft rejected the request. Wait 10-15 minutes and try again."))
+        .padding().frame(width: 560)
+}
+
+#Preview("macOS versions") {
+    OptionsStepView().environmentObject(PreviewModel.macOptions()).padding().frame(width: 560)
+}
+
+#Preview("macOS versions — dark") {
+    OptionsStepView().environmentObject(PreviewModel.macOptions())
+        .padding().frame(width: 560).preferredColorScheme(.dark)
+}
+#endif

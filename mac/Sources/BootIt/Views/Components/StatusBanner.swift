@@ -75,3 +75,16 @@ struct StatusBanner: View {
         .accessibilityLabel(style.spokenPrefix + [title, message].compactMap { $0 }.joined(separator: ". "))
     }
 }
+
+#if DEBUG
+#Preview("Status banners") {
+    VStack(spacing: 10) {
+        StatusBanner(.information, message: "Downloaded directly from Microsoft, not repackaged.")
+        StatusBanner(.warning, message: "No external drives found. Insert a USB drive and choose Refresh.")
+        StatusBanner(.error, title: "The build stopped", message: "Splitting install.wim failed (wimlib exit 2).")
+        StatusBanner(.success, message: "Install media now available.")
+    }
+    .padding()
+    .frame(width: 460)
+}
+#endif

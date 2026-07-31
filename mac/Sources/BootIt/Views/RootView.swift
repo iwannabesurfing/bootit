@@ -159,3 +159,28 @@ struct RootView: View {
             + "and creates a bootable \(target) installer. This action cannot be undone."
     }
 }
+
+#if DEBUG
+#Preview("Platform step") {
+    RootView().environmentObject(PreviewModel.platform(nil)).frame(width: 760, height: 600)
+}
+
+#Preview("Drive step") {
+    RootView().environmentObject(PreviewModel.drives(selected: 0, acknowledged: true))
+        .frame(width: 760, height: 600)
+}
+
+#Preview("Drive step — dark") {
+    RootView().environmentObject(PreviewModel.drives(selected: 0, acknowledged: true))
+        .frame(width: 760, height: 600).preferredColorScheme(.dark)
+}
+
+#Preview("Writing") {
+    RootView().environmentObject(PreviewModel.writing(progress: 0.42, phase: .copying))
+        .frame(width: 760, height: 600)
+}
+
+#Preview("Complete") {
+    RootView().environmentObject(PreviewModel.completed()).frame(width: 760, height: 600)
+}
+#endif

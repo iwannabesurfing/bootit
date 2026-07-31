@@ -51,3 +51,17 @@ struct DriveCard: View {
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 }
+
+#if DEBUG
+#Preview("Drive card — selected") {
+    DriveCard(disk: PreviewModel.sampleDrives[0], selected: true) {}
+        .padding()
+        .frame(width: 420)
+}
+
+#Preview("Drive card — unselected") {
+    DriveCard(disk: PreviewModel.sampleDrives[2], selected: false) {}
+        .padding()
+        .frame(width: 420)
+}
+#endif
