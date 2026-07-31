@@ -190,8 +190,9 @@ git tag v3.1.0 && git push origin v3.1.0
 ```
 
 The workflow refuses to run if the tag and `mac/Info.plist`'s
-`CFBundleShortVersionString` disagree. It signs and notarises when the repo
-secrets below exist, and falls back to an ad-hoc DMG when they don't:
+`CFBundleShortVersionString` disagree. It publishes **only** when the signing
+secrets below exist — without them it still builds and uploads the DMG as a
+workflow artifact, but won't publish an unsigned release:
 
 | Secret | What it is |
 |--------|------------|

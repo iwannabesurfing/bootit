@@ -88,8 +88,11 @@ jobs:
           path: mac/dist/BootIt.dmg
           if-no-files-found: error
 
+      # Only ever publish a signed, notarised build. Without the signing secrets
+      # this job still builds and uploads an artifact, so the pipeline stays
+      # exercised, but the release itself is left for a human to publish.
       - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') && env.MACOS_CERT_P12 != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
