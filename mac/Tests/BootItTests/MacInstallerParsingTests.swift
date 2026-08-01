@@ -39,3 +39,36 @@ final class MacInstallerParsingTests: XCTestCase {
         XCTAssertTrue(MacOSGroup.group([]).isEmpty)
     }
 }
+
+/// Reusing an installer that is already on disk, rather than re-fetching ~18 GB
+/// of it, hinges entirely on reading the right version key. `CFBundleShortVersionString`
+/// is the installer app's own version (21.6.01); the macOS release it delivers
+/// is `DTPlatformVersion` (26.6). Matching on the wrong one would either
+/// re-download every time or, worse, hand back an installer for the wrong OS.
+final class InstallerVersionMatchingTests: XCTestCase {
+
+    func testPlatformVersionComesFromDTPlatformVersion() {
+        let info: [String: Any] = [
+            "CFBundleShortVersionString": "21.6.01",
+            "DTPlatformVersion": "26.6",
+            "CFBundleIdentifier": "com.apple.InstallAssistant.macOSTahoe"
+        ]
+        XCTAssertEqual(MacInstaller.platformVersion(ofInfo: info), "26.6")
+        XCTAssertNotEqual(MacInstaller.platformVersion(ofInfo: info), "21.6.01",
+                          "the installer's own version must never be mistaken for the OS version")
+    }
+
+    func testMissingKeyYieldsNoVersionRatherThanAWrongOne() {
+        XCTAssertNil(MacInstaller.platformVersion(ofInfo: ["CFBundleShortVersionString": "21.6.01"]))
+        XCTAssertNil(MacInstaller.platformVersion(ofInfo: [:]))
+    }
+
+    /// A point release is a different download; 26.6 must not satisfy a request
+    /// for 26.5.2, or the user gets an installer they did not choose.
+    func testVersionsMatchExactly() {
+        let info: [String: Any] = ["DTPlatformVersion": "26.6"]
+        XCTAssertEqual(MacInstaller.platformVersion(ofInfo: info), "26.6")
+        XCTAssertNotEqual(MacInstaller.platformVersion(ofInfo: info), "26.5.2")
+        XCTAssertNotEqual(MacInstaller.platformVersion(ofInfo: info), "26")
+    }
+}

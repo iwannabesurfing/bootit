@@ -29,8 +29,10 @@ struct USBStepView: View {
 
                 if model.platform == .macos {
                     StatusBanner(.information,
-                                 message: "Creating a macOS installer needs administrator access — "
-                                        + "you'll be asked for your password after you confirm.")
+                                 title: "You'll be asked for your password",
+                                 message: "Apple's createinstallmedia has to run as root. macOS labels "
+                                        + "that prompt “osascript”, which is the helper BootIt uses to "
+                                        + "run it — your password is never seen or stored by this app.")
                 }
             }
 

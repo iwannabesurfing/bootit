@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// A downloadable macOS full installer, as listed by `softwareupdate`.
@@ -134,6 +135,41 @@ final class MacInstaller {
         return out
     }
 
+    /// The macOS release an installer bundle actually installs, e.g. "26.6".
+    /// `CFBundleShortVersionString` is the *installer's* own version (21.6.01),
+    /// not the OS it delivers, so it can't be used for this.
+    static func platformVersion(ofInfo info: [String: Any]) -> String? {
+        info["DTPlatformVersion"] as? String
+    }
+
+    static func platformVersion(of app: URL) -> String? {
+        let plist = app.appendingPathComponent("Contents/Info.plist")
+        guard let info = NSDictionary(contentsOf: plist) as? [String: Any] else { return nil }
+        return platformVersion(ofInfo: info)
+    }
+
+    /// An already-downloaded installer for exactly this release, if one is here.
+    static func installedInstaller(forVersion version: String) -> URL? {
+        installedApps().first {
+            platformVersion(of: $0) == version
+                && FileManager.default.isExecutableFile(
+                    atPath: $0.appendingPathComponent("Contents/Resources/createinstallmedia").path)
+        }
+    }
+
+    /// `softwareupdate --fetch-full-installer` opens the installer assistant when
+    /// it finishes. That window lands in front of BootIt offering to install
+    /// macOS on *this* Mac — confusing at best, and genuinely destructive if
+    /// someone clicks through it. BootIt caused it to appear, so BootIt closes it.
+    @discardableResult
+    static func closeInstallerAssistant() -> Bool {
+        let assistants = NSWorkspace.shared.runningApplications.filter {
+            $0.bundleIdentifier?.hasPrefix("com.apple.InstallAssistant") == true
+        }
+        assistants.forEach { $0.terminate() }
+        return !assistants.isEmpty
+    }
+
     /// "Install macOS *.app" bundles already in /Applications.
     static func installedApps() -> [URL] {
         let apps = (try? FileManager.default.contentsOfDirectory(
@@ -153,6 +189,15 @@ final class MacInstaller {
     /// Download a macOS installer to /Applications via softwareupdate, then
     /// return the path to the resulting "Install macOS *.app".
     func download(version: String) throws -> String {
+        // Re-fetching ~18 GB that is already sitting in /Applications helps
+        // nobody, and it is the step that triggers the installer assistant.
+        if let existing = Self.installedInstaller(forVersion: version) {
+            onLog("\(existing.lastPathComponent) (macOS \(version)) is already in /Applications — "
+                + "using it instead of downloading it again.")
+            onProgress(1.0, "Using the installer already on this Mac")
+            return existing.path
+        }
+
         onLog("Downloading macOS \(version) from Apple — this is a large download (~12–18 GB).")
         onProgress(0, "Starting download…")
         let code = Shell.runStreaming(
@@ -168,7 +213,16 @@ final class MacInstaller {
             })
         if cancel.isCancelled { throw MacInstallerError.cancelled }
         if code != 0 { throw MacInstallerError.downloadFailed("softwareupdate exit \(code)") }
-        guard let app = Self.installedApps().first else { throw MacInstallerError.installerAppNotFound }
+
+        // The assistant is launched by softwareupdate as it exits, so it can
+        // appear a moment after the command returns.
+        if Self.closeInstallerAssistant() {
+            onLog("Closed the macOS installer window that opened itself.")
+        }
+
+        guard let app = Self.installedInstaller(forVersion: version) ?? Self.installedApps().first else {
+            throw MacInstallerError.installerAppNotFound
+        }
         onLog("Downloaded: \(app.lastPathComponent)")
         return app.path
     }
@@ -179,6 +233,11 @@ final class MacInstaller {
         let tool = "\(installerAppPath)/Contents/Resources/createinstallmedia"
         guard FileManager.default.isExecutableFile(atPath: tool) else {
             throw MacInstallerError.createMediaToolMissing
+        }
+        // A late-appearing assistant also keeps the installer's SharedSupport
+        // image mounted, which createinstallmedia has to work around.
+        if Self.closeInstallerAssistant() {
+            onLog("Closed the macOS installer window that opened itself.")
         }
         try check()
         onPhase(.preparing)
@@ -247,7 +306,12 @@ final class MacInstaller {
             }
         }
 
-        onLog("Authorising… you'll be prompted for your administrator password.")
+        // macOS attributes this dialog to the process that asks, which is the
+        // osascript helper rather than BootIt. Saying so up front is better than
+        // letting an unexplained "osascript wants to make changes" appear.
+        onLog("Authorising… macOS will ask for your administrator password. "
+            + "The dialog is titled “osascript” — that's the helper BootIt uses to run "
+            + "Apple's createinstallmedia as root.")
         let result = runWithAdmin(scriptPath: scriptPath)
         pollStop.cancel()
 
