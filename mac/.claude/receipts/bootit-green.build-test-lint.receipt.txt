@@ -1,0 +1,202 @@
+# D-RUNRECEIPT — trigger bootit-green, check build-test-lint (2026-08-01)
+$ bash -c swift build -c release --arch arm64 && swift test && swiftlint lint --strict
+--- captured output (stdout+stderr, path-normalized; redirect, not hand-typed) ---
+[0/1] Planning build
+Building for production...
+[0/2] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.14s)
+[0/1] Planning build
+Building for debugging...
+[0/4] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.12s)
+Test Suite 'All tests' started at 2026-08-01 20:39:11.576.
+Test Suite 'BootItPackageTests.xctest' started at 2026-08-01 20:39:11.577.
+Test Suite 'FailureStateTests' started at 2026-08-01 20:39:11.577.
+Test Case '-[BootItTests.FailureStateTests testDiskutilSizeErrorExplainsTheBootablePartitionCause]' started.
+Test Case '-[BootItTests.FailureStateTests testDiskutilSizeErrorExplainsTheBootablePartitionCause]' passed (0.001 seconds).
+Test Case '-[BootItTests.FailureStateTests testFailureReplacesCancelWithAWorkingAction]' started.
+Test Case '-[BootItTests.FailureStateTests testFailureReplacesCancelWithAWorkingAction]' passed (0.000 seconds).
+Test Case '-[BootItTests.FailureStateTests testMicrosoftRateLimitPointsAtTheLocalISOPath]' started.
+Test Case '-[BootItTests.FailureStateTests testMicrosoftRateLimitPointsAtTheLocalISOPath]' passed (0.000 seconds).
+Test Case '-[BootItTests.FailureStateTests testNoHintWhileHealthy]' started.
+Test Case '-[BootItTests.FailureStateTests testNoHintWhileHealthy]' passed (0.000 seconds).
+Test Case '-[BootItTests.FailureStateTests testTheFailingPhaseReadsAsFailedNotActive]' started.
+Test Case '-[BootItTests.FailureStateTests testTheFailingPhaseReadsAsFailedNotActive]' passed (0.000 seconds).
+Test Case '-[BootItTests.FailureStateTests testUnknownFailuresGetNoInventedAdvice]' started.
+Test Case '-[BootItTests.FailureStateTests testUnknownFailuresGetNoInventedAdvice]' passed (0.000 seconds).
+Test Suite 'FailureStateTests' passed at 2026-08-01 20:39:11.578.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'FlowTests' started at 2026-08-01 20:39:11.578.
+Test Case '-[BootItTests.FlowTests testBackDestinations]' started.
+Test Case '-[BootItTests.FlowTests testBackDestinations]' passed (0.000 seconds).
+Test Case '-[BootItTests.FlowTests testDownloadSourceGoesToOptions]' started.
+Test Case '-[BootItTests.FlowTests testDownloadSourceGoesToOptions]' passed (0.000 seconds).
+Test Case '-[BootItTests.FlowTests testDriveStepAsksForConfirmationRatherThanErasingImmediately]' started.
+Test Case '-[BootItTests.FlowTests testDriveStepAsksForConfirmationRatherThanErasingImmediately]' passed (0.000 seconds).
+Test Case '-[BootItTests.FlowTests testDriveStepRequiresBothASelectionAndAnAcknowledgement]' started.
+Test Case '-[BootItTests.FlowTests testDriveStepRequiresBothASelectionAndAnAcknowledgement]' passed (0.000 seconds).
+Test Case '-[BootItTests.FlowTests testGoBackClearsAStaleErrorMessage]' started.
+Test Case '-[BootItTests.FlowTests testGoBackClearsAStaleErrorMessage]' passed (0.000 seconds).
+Test Case '-[BootItTests.FlowTests testGoBackIsInertWhereThereIsNoBack]' started.
+Test Case '-[BootItTests.FlowTests testGoBackIsInertWhereThereIsNoBack]' passed (0.000 seconds).
+Test Case '-[BootItTests.FlowTests testLocalISORouteNeverPassesThroughOptions]' started.
+Test Case '-[BootItTests.FlowTests testLocalISORouteNeverPassesThroughOptions]' passed (0.000 seconds).
+Test Case '-[BootItTests.FlowTests testLocalMacSourceReportsItsOwnMessage]' started.
+Test Case '-[BootItTests.FlowTests testLocalMacSourceReportsItsOwnMessage]' passed (0.000 seconds).
+Test Case '-[BootItTests.FlowTests testLocalWindowsSourceIsBlockedWhenTheFileIsGone]' started.
+Test Case '-[BootItTests.FlowTests testLocalWindowsSourceIsBlockedWhenTheFileIsGone]' passed (0.000 seconds).
+Test Case '-[BootItTests.FlowTests testLocalWindowsSourceIsInvalidWithoutAPath]' started.
+Test Case '-[BootItTests.FlowTests testLocalWindowsSourceIsInvalidWithoutAPath]' passed (0.000 seconds).
+Test Case '-[BootItTests.FlowTests testOptionsStepStaysDisabledWhileLoading]' started.
+Test Case '-[BootItTests.FlowTests testOptionsStepStaysDisabledWhileLoading]' passed (0.000 seconds).
+Test Case '-[BootItTests.FlowTests testOptionsStepWaitsForItsCatalogue]' started.
+Test Case '-[BootItTests.FlowTests testOptionsStepWaitsForItsCatalogue]' passed (0.000 seconds).
+Test Case '-[BootItTests.FlowTests testPlatformStepAdvancesToSourceOnceChosen]' started.
+Test Case '-[BootItTests.FlowTests testPlatformStepAdvancesToSourceOnceChosen]' passed (0.000 seconds).
+Test Case '-[BootItTests.FlowTests testPlatformStepBlocksUntilAPlatformIsChosen]' started.
+Test Case '-[BootItTests.FlowTests testPlatformStepBlocksUntilAPlatformIsChosen]' passed (0.000 seconds).
+Test Case '-[BootItTests.FlowTests testPrimaryActionIsAlwaysTitledEvenWhenDisabled]' started.
+Test Case '-[BootItTests.FlowTests testPrimaryActionIsAlwaysTitledEvenWhenDisabled]' passed (0.000 seconds).
+Test Case '-[BootItTests.FlowTests testResetClearsTheDestructiveGates]' started.
+Test Case '-[BootItTests.FlowTests testResetClearsTheDestructiveGates]' passed (0.000 seconds).
+Test Case '-[BootItTests.FlowTests testSelectedDriveIsNilWhenTheIndexOutlivesTheDrive]' started.
+Test Case '-[BootItTests.FlowTests testSelectedDriveIsNilWhenTheIndexOutlivesTheDrive]' passed (0.000 seconds).
+Test Case '-[BootItTests.FlowTests testStartDoesNothingWithoutASelectedDrive]' started.
+Test Case '-[BootItTests.FlowTests testStartDoesNothingWithoutASelectedDrive]' passed (0.000 seconds).
+Test Case '-[BootItTests.FlowTests testValidLocalSourceGoesStraightToTheDriveAndRescans]' started.
+Test Case '-[BootItTests.FlowTests testValidLocalSourceGoesStraightToTheDriveAndRescans]' passed (0.000 seconds).
+Test Suite 'FlowTests' passed at 2026-08-01 20:39:11.580.
+	 Executed 19 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'FormattingTests' started at 2026-08-01 20:39:11.580.
+Test Case '-[BootItTests.FormattingTests testBytesHumanReachesTerabytes]' started.
+Test Case '-[BootItTests.FormattingTests testBytesHumanReachesTerabytes]' passed (0.000 seconds).
+Test Case '-[BootItTests.FormattingTests testBytesHumanScalesThroughUnits]' started.
+Test Case '-[BootItTests.FormattingTests testBytesHumanScalesThroughUnits]' passed (0.000 seconds).
+Test Case '-[BootItTests.FormattingTests testDriveSizesMatchWhatDiskUtilityReports]' started.
+Test Case '-[BootItTests.FormattingTests testDriveSizesMatchWhatDiskUtilityReports]' passed (0.000 seconds).
+Test Case '-[BootItTests.FormattingTests testUnitBoundariesRollOverAtAThousand]' started.
+Test Case '-[BootItTests.FormattingTests testUnitBoundariesRollOverAtAThousand]' passed (0.000 seconds).
+Test Suite 'FormattingTests' passed at 2026-08-01 20:39:11.581.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'InstallerVersionMatchingTests' started at 2026-08-01 20:39:11.581.
+Test Case '-[BootItTests.InstallerVersionMatchingTests testMissingKeyYieldsNoVersionRatherThanAWrongOne]' started.
+Test Case '-[BootItTests.InstallerVersionMatchingTests testMissingKeyYieldsNoVersionRatherThanAWrongOne]' passed (0.000 seconds).
+Test Case '-[BootItTests.InstallerVersionMatchingTests testPlatformVersionComesFromDTPlatformVersion]' started.
+Test Case '-[BootItTests.InstallerVersionMatchingTests testPlatformVersionComesFromDTPlatformVersion]' passed (0.000 seconds).
+Test Case '-[BootItTests.InstallerVersionMatchingTests testVersionsMatchExactly]' started.
+Test Case '-[BootItTests.InstallerVersionMatchingTests testVersionsMatchExactly]' passed (0.000 seconds).
+Test Suite 'InstallerVersionMatchingTests' passed at 2026-08-01 20:39:11.581.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'MacInstallerParsingTests' started at 2026-08-01 20:39:11.581.
+Test Case '-[BootItTests.MacInstallerParsingTests testGroupingCollapsesByMajorVersionPreservingOrder]' started.
+Test Case '-[BootItTests.MacInstallerParsingTests testGroupingCollapsesByMajorVersionPreservingOrder]' passed (0.001 seconds).
+Test Case '-[BootItTests.MacInstallerParsingTests testGroupingEmptyInputYieldsNoGroups]' started.
+Test Case '-[BootItTests.MacInstallerParsingTests testGroupingEmptyInputYieldsNoGroups]' passed (0.000 seconds).
+Test Case '-[BootItTests.MacInstallerParsingTests testIgnoresNonInstallerLines]' started.
+Test Case '-[BootItTests.MacInstallerParsingTests testIgnoresNonInstallerLines]' passed (0.000 seconds).
+Test Case '-[BootItTests.MacInstallerParsingTests testParsesEveryInstallerLine]' started.
+Test Case '-[BootItTests.MacInstallerParsingTests testParsesEveryInstallerLine]' passed (0.000 seconds).
+Test Suite 'MacInstallerParsingTests' passed at 2026-08-01 20:39:11.583.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'PresentationTests' started at 2026-08-01 20:39:11.583.
+Test Case '-[BootItTests.PresentationTests testAllPhasesReadAsDoneOnceFinished]' started.
+Test Case '-[BootItTests.PresentationTests testAllPhasesReadAsDoneOnceFinished]' passed (0.000 seconds).
+Test Case '-[BootItTests.PresentationTests testBypassOptionAppearsOnTheDriveStepOnlyForLocalWindowsSources]' started.
+Test Case '-[BootItTests.PresentationTests testBypassOptionAppearsOnTheDriveStepOnlyForLocalWindowsSources]' passed (0.000 seconds).
+Test Case '-[BootItTests.PresentationTests testDownloadRouteShowsFourStages]' started.
+Test Case '-[BootItTests.PresentationTests testDownloadRouteShowsFourStages]' passed (0.000 seconds).
+Test Case '-[BootItTests.PresentationTests testEveryPlannedPhaseHasATitleAndSymbol]' started.
+Test Case '-[BootItTests.PresentationTests testEveryPlannedPhaseHasATitleAndSymbol]' passed (0.000 seconds).
+Test Case '-[BootItTests.PresentationTests testEveryShownStageIsAddressable]' started.
+Test Case '-[BootItTests.PresentationTests testEveryShownStageIsAddressable]' passed (0.000 seconds).
+Test Case '-[BootItTests.PresentationTests testEveryWindowsRouteCanReachTheBypassOption]' started.
+Test Case '-[BootItTests.PresentationTests testEveryWindowsRouteCanReachTheBypassOption]' passed (0.000 seconds).
+Test Case '-[BootItTests.PresentationTests testHeadingsNameThePlatform]' started.
+Test Case '-[BootItTests.PresentationTests testHeadingsNameThePlatform]' passed (0.000 seconds).
+Test Case '-[BootItTests.PresentationTests testLocalRouteDropsTheOptionsStage]' started.
+Test Case '-[BootItTests.PresentationTests testLocalRouteDropsTheOptionsStage]' passed (0.000 seconds).
+Test Case '-[BootItTests.PresentationTests testMacRouteDelegatesToCreateInstallMedia]' started.
+Test Case '-[BootItTests.PresentationTests testMacRouteDelegatesToCreateInstallMedia]' passed (0.000 seconds).
+Test Case '-[BootItTests.PresentationTests testNothingIsActiveBeforeTheFirstPhaseArrives]' started.
+Test Case '-[BootItTests.PresentationTests testNothingIsActiveBeforeTheFirstPhaseArrives]' passed (0.000 seconds).
+Test Case '-[BootItTests.PresentationTests testPageTitlesAreDistinctPerStep]' started.
+Test Case '-[BootItTests.PresentationTests testPageTitlesAreDistinctPerStep]' passed (0.000 seconds).
+Test Case '-[BootItTests.PresentationTests testPhasesSequenceDoneActiveAndPending]' started.
+Test Case '-[BootItTests.PresentationTests testPhasesSequenceDoneActiveAndPending]' passed (0.000 seconds).
+Test Case '-[BootItTests.PresentationTests testPhaseTitlesNameTheOperatingSystem]' started.
+Test Case '-[BootItTests.PresentationTests testPhaseTitlesNameTheOperatingSystem]' passed (0.000 seconds).
+Test Case '-[BootItTests.PresentationTests testProgressTitleSwitchesToFailure]' started.
+Test Case '-[BootItTests.PresentationTests testProgressTitleSwitchesToFailure]' passed (0.000 seconds).
+Test Case '-[BootItTests.PresentationTests testResetClearsPresentationState]' started.
+Test Case '-[BootItTests.PresentationTests testResetClearsPresentationState]' passed (0.000 seconds).
+Test Case '-[BootItTests.PresentationTests testStartClearsPhaseAndLogDisclosure]' started.
+Test Case '-[BootItTests.PresentationTests testStartClearsPhaseAndLogDisclosure]' passed (0.000 seconds).
+Test Case '-[BootItTests.PresentationTests testWindowsDownloadPlansEveryStage]' started.
+Test Case '-[BootItTests.PresentationTests testWindowsDownloadPlansEveryStage]' passed (0.000 seconds).
+Test Case '-[BootItTests.PresentationTests testWindowsLocalSourceHasNothingToDownload]' started.
+Test Case '-[BootItTests.PresentationTests testWindowsLocalSourceHasNothingToDownload]' passed (0.000 seconds).
+Test Case '-[BootItTests.PresentationTests testWritingAndCompletionReplaceSetupProgress]' started.
+Test Case '-[BootItTests.PresentationTests testWritingAndCompletionReplaceSetupProgress]' passed (0.000 seconds).
+Test Suite 'PresentationTests' passed at 2026-08-01 20:39:11.585.
+	 Executed 19 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'RegexCacheTests' started at 2026-08-01 20:39:11.585.
+Test Case '-[BootItTests.RegexCacheTests testAllGroupsReturnsEveryMatchWithGroups]' started.
+Test Case '-[BootItTests.RegexCacheTests testAllGroupsReturnsEveryMatchWithGroups]' passed (0.000 seconds).
+Test Case '-[BootItTests.RegexCacheTests testFirstCaptureReturnsGroup]' started.
+Test Case '-[BootItTests.RegexCacheTests testFirstCaptureReturnsGroup]' passed (0.000 seconds).
+Test Case '-[BootItTests.RegexCacheTests testFirstCaptureReturnsNilWhenNoMatch]' started.
+Test Case '-[BootItTests.RegexCacheTests testFirstCaptureReturnsNilWhenNoMatch]' passed (0.000 seconds).
+Test Case '-[BootItTests.RegexCacheTests testLastCapturePicksFinalMatch]' started.
+Test Case '-[BootItTests.RegexCacheTests testLastCapturePicksFinalMatch]' passed (0.000 seconds).
+Test Case '-[BootItTests.RegexCacheTests testRepeatedPatternUsesCacheConsistently]' started.
+Test Case '-[BootItTests.RegexCacheTests testRepeatedPatternUsesCacheConsistently]' passed (0.000 seconds).
+Test Suite 'RegexCacheTests' passed at 2026-08-01 20:39:11.586.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'USBWriterTests' started at 2026-08-01 20:39:11.586.
+Test Case '-[BootItTests.USBWriterTests testCopyStageCopiesFilesAndVerifies]' started.
+Test Case '-[BootItTests.USBWriterTests testCopyStageCopiesFilesAndVerifies]' passed (0.144 seconds).
+Test Case '-[BootItTests.USBWriterTests testSplitPathProducesSWMParts]' started.
+Test Case '-[BootItTests.USBWriterTests testSplitPathProducesSWMParts]' passed (0.308 seconds).
+Test Case '-[BootItTests.USBWriterTests testVerifyFailsWhenBootFileMissing]' started.
+Test Case '-[BootItTests.USBWriterTests testVerifyFailsWhenBootFileMissing]' passed (0.002 seconds).
+Test Suite 'USBWriterTests' passed at 2026-08-01 20:39:12.040.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.454 (0.454) seconds
+Test Suite 'BootItPackageTests.xctest' passed at 2026-08-01 20:39:12.040.
+	 Executed 63 tests, with 0 failures (0 unexpected) in 0.461 (0.463) seconds
+Test Suite 'All tests' passed at 2026-08-01 20:39:12.040.
+	 Executed 63 tests, with 0 failures (0 unexpected) in 0.461 (0.464) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.
+Linting Swift files in current working directory
+Linting 'WritePhase.swift' (1/26)
+Linting 'Flow.swift' (3/26)
+Linting 'AppModel.swift' (2/26)
+Linting 'Main.swift' (4/26)
+Linting 'BootItApp.swift' (5/26)
+Linting 'Regex.swift' (6/26)
+Linting 'Shell.swift' (7/26)
+Linting 'RootView.swift' (8/26)
+Linting 'Theme.swift' (10/26)
+Linting 'DriveCard.swift' (11/26)
+Linting 'PreviewSupport.swift' (9/26)
+Linting 'ProgressRing.swift' (14/26)
+Linting 'ChoiceCard.swift' (12/26)
+Linting 'StatusBanner.swift' (13/26)
+Linting 'StepIndicator.swift' (15/26)
+Linting 'ProgressStepView.swift' (16/26)
+Linting 'USBStepView.swift' (17/26)
+Linting 'PlatformStepView.swift' (18/26)
+Linting 'OptionsStepView.swift' (19/26)
+Linting 'SourceStepView.swift' (20/26)
+Linting 'CompletionStepView.swift' (21/26)
+Linting 'MacInstaller.swift' (22/26)
+Linting 'MicrosoftCatalog.swift' (23/26)
+Linting 'ISODownloader.swift' (24/26)
+Linting 'USBWriter.swift' (26/26)
+Linting 'DiskLister.swift' (25/26)
+Done linting! Found 0 violations, 0 serious in 26 files.
+--- end ---
+command-exit=0
+VERDICT: CLEAN — exit 0, no defects surfaced.

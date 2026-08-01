@@ -1,0 +1,8 @@
+# D-RUNRECEIPT — trigger membudget, check mem-hygiene (2026-08-01)
+$ ~/Dev/_leme/bin/al-membudget.sh
+--- captured output (stdout+stderr, path-normalized; redirect, not hand-typed) ---
+  ✓ index 'MEMORY.md' — 414 bytes ≤ budget 460.
+✓ B-MEMBUDGET: MEM-BUDGET-OK — every rolling memory surface in '~/.claude/projects/-Users-mick-dev-BootIt/memory' is within budget.
+--- end ---
+command-exit=0
+VERDICT: CLEAN — exit 0, no defects surfaced.

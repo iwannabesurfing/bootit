@@ -8,8 +8,13 @@ dist/
 # wimlib on the build machine; not source, so not tracked.
 mac/vendor/
 
-# Local Claude Code settings
-.claude/
+# Local Claude Code settings — but session continuity is not "local settings".
+# The log, promotion queue and run receipts are the record of what happened and
+# why, and they have to survive a fresh clone.
+.claude/*
+!.claude/session-log.md
+!.claude/promotion-queue/
+!.claude/receipts/
 
 # macOS cruft
 .DS_Store
