@@ -2,11 +2,17 @@
 
 ## 2026-08-02 — the macOS path actually works: privileged helper + the TCC grant
 
-**Commits:** `deb1a76` "Run createinstallmedia from a privileged helper, and make the
-macOS path work", `5c456c6` "Say Skipped when no download happened".
+**Commits:** `deb1a76` → `e33d0d3` (7 this session, none pushed).
 
-**Local:** 87 tests, 0 failures; SwiftLint strict 0 violations, 33 files. Signed release
+**Local:** 98 tests, 0 failures; SwiftLint strict 0 violations, 33 files. Signed release
 build installed to `/Applications/BootIt.app`.
+
+⚠ **The last three commits are UNVERIFIED against a real run.** `0b79b15` (review fixes)
+and `e33d0d3` (fingerprint staleness) changed the daemon's threading model — work moved to
+a serial queue, disk claim/release added, idle-exit gated on in-flight work, invalidation
+now fails outstanding calls. No write has gone through any of it. **Phase 0 below is the
+first thing the next session does.** Two full runs succeeded earlier today, but both
+predate this restructuring.
 
 ### The headline
 
@@ -113,17 +119,62 @@ app and the daemon fail with an identical `EPERM` while being governed by entire
 TCC rules, so the symptom carries no information about the cause. The `Test USB Access`
 button exists so that is never guessed at again.
 
-### Next session should start with
+### Independent review — what two fresh-context reviewers found
 
-1. **Confirm the measured copy progress live.** The callback fix and the last-percent
-   parser are both proven on screen (2% → 5% → 15%, and `Erasing disk: … 100%` read
-   correctly). The byte poller that drives 15% → 93% has never run — it was written while
-   the verifying run was still in flight, so it is tested but unobserved.
-2. **Version bump + tag.** GitHub still has v3.1.0, whose macOS path cannot work. This
-   release matters more than the UI redesign did.
-3. **First-run FDA guidance.** The grant is documented and detected, but a new user still
-   meets it as a failure rather than as onboarding.
-4. Add the 6 repo secrets so tagging publishes without a local build.
+Run at the end of the session, on the author's instruction ("I don't want this to be a
+vibe-coded lines-on-top-of-lines job"). They were right to be asked.
+
+- **Cancel was dead code.** The XPC method, `ToolRunner.cancel()` and
+  `PrivilegedHelper.cancel()` all existed; nothing called the last one. The button did
+  nothing for up to twenty minutes. Every piece present is exactly why it read as done.
+- **`volumeName` had no validation** while `disk` had a regex, an external-disk re-check
+  and its own test class — and `volumeName` was interpolated into `/Volumes/<name>` and
+  handed to a root `createinstallmedia`. `".."` resolves to `/`.
+- **Root-exec of a caller-supplied path** behind nothing but an is-executable check.
+- **Idle-exit could orphan a live child.** `exit()` does not kill `createinstallmedia`; it
+  reparents to launchd and keeps writing, and the next launch starts a second write on the
+  same drive.
+- **`invalidate()` never failed an in-flight call**, so Remove Helper mid-write hung the
+  write thread on its semaphore forever.
+- **No mutual exclusion** on destructive operations; **XPC methods blocked their own
+  connection**, so a cancel could not have been delivered even once wired.
+
+All fixed in `0b79b15`. Then, immediately after: the version constant had **not** been
+bumped, so the app kept talking to a resident daemon running the pre-fix binary — the
+fixes were installed and not in effect. Fixed properly in `e33d0d3` by fingerprinting the
+running binary instead of trusting a constant.
+
+### Next session — the plan
+
+**Phase 0 — verify before touching anything.** The daemon's threading model changed at the
+end of a long session and no write has exercised it.
+  1. One full run to green.
+  2. **Cancel mid-copy** — never fired once. Must stop in seconds with a clean failure, not
+     a hang. Use a throwaway drive.
+  3. `pgrep BootItHelper` after: gone ~30 s after the app goes quiet, and never mid-write.
+  If Cancel fails, everything below waits.
+
+**Phase 1 — the real cleanup** (fresh context; this is restructuring, not patching):
+  1. **Move `eraseDisk` out of the daemon.** It never needed root — it ran unprivileged
+     before this session and `USBWriter.erase()` still does, unprivileged, in the same
+     binary. It was folded in because a daemon was already being built, and it duplicates
+     USBWriter's erase-retry line for line. Factor one tested function into `BootItShared`.
+  2. **Replace the `NEEDS_FULL_DISK_ACCESS:` string prefix with an `NSError`.** `@objc`
+     can't carry a Swift enum but `NSError` round-trips over XPC natively. Three reviewers
+     flagged it independently.
+  3. **Tests for `PrivilegedHelper` itself.** The riskiest file has none — `call()`,
+     invalidation, cancel, the error decode. Inject a proxy provider and mock the protocol.
+  4. `DispatchSourceTimer` instead of `Thread.sleep` in the copy poller.
+
+**Phase 2 — release readiness:**
+  1. **Test whether `SMAppService` registration is admin-gated.** Unknown, and it decides
+     whether a standard account can approve a system-wide root daemon. 5 min on a test
+     account.
+  2. **First-run Full Disk Access onboarding** — users meet it as a failure today.
+  3. **CI cost fix** — `ci.yml:14` runs macOS (~10× Linux) on every push with no `if:`.
+     Do this BEFORE pushing seven commits.
+  4. **Version bump + tag + notarised release.** GitHub still ships v3.1.0, whose macOS
+     path cannot work. This is the release that matters.
 
 [promote-spine: when a privileged operation fails with EPERM as root but succeeds as an ordinary user, it is TCC, not permissions — and root daemons are NOT exempt; they simply can never be prompted, so the grant has to be made by hand]
 
@@ -134,6 +185,12 @@ button exists so that is never guessed at again.
 [promote-spine: a CLI's progress output is a version-dependent contract — macOS 26's createinstallmedia prints percentages for the erase and nothing for the 15-minute copy, where older versions printed "Copying to disk: x%"; when the numbers aren't in the output, measure the effect (bytes landing on the volume) instead of parsing harder]
 
 [promote-spine: `volumeIsInternal == false` is true of mounted SMB/AFP shares as well as USB sticks — a "find the external volume" filter needs volumeIsLocal too, or diagnostics silently describe the wrong device]
+
+[promote-spine: a subsystem where every piece exists reads as finished — BootIt's cancel had an XPC method, a ToolRunner.cancel() and a PrivilegedHelper.cancel(), and nothing ever called the last one; grep for the call site, do not infer completeness from the parts]
+
+[promote-spine: harden one caller-supplied parameter and you will forget its neighbour — BootIt validated `disk` with a regex, an external-disk re-check and a dedicated test class while `volumeName` beside it went unvalidated into a root process's path; validate the whole argument list of a privileged call, as a set]
+
+[promote-profile:swift: a privileged helper's staleness must be detected by fingerprinting the binary the daemon actually launched with, never by a hand-bumped version constant — the constant was missed twice, once shipping security fixes that were installed but not in effect]
 
 [promote-spine: never bind a destructive-adjacent "Quit"/"Done" to .defaultAction on a completion screen while removable media is still mounted — Return becomes one keystroke from an unejected pull]
 
