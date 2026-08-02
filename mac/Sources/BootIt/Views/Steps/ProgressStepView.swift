@@ -52,7 +52,13 @@ struct ProgressStepView: View {
                     marker(state)
                     Text(model.title(for: phase))
                         .font(.callout.weight(state == .active || state == .failed ? .semibold : .regular))
-                        .foregroundStyle(state == .pending ? Color.secondary : Color.primary)
+                        .foregroundStyle(state == .pending || state == .skipped
+                                         ? Color.secondary : Color.primary)
+                    if state == .skipped {
+                        Text("Skipped — already on this Mac")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer(minLength: 0)
                 }
                 .accessibilityElement(children: .ignore)
@@ -78,6 +84,11 @@ struct ProgressStepView: View {
         case .failed:
             Image(systemName: "xmark.circle.fill")
                 .foregroundStyle(.red)
+        case .skipped:
+            Image(systemName: "minus.circle")
+                .foregroundStyle(Color.secondary.opacity(0.7))
+                .font(.system(size: 12))
+                .frame(width: 16)
         case .pending:
             Image(systemName: "circle")
                 .foregroundStyle(Color.secondary.opacity(0.4))
@@ -91,6 +102,7 @@ struct ProgressStepView: View {
         case .done:    return "Completed"
         case .active:  return "In progress"
         case .failed:  return "Failed"
+        case .skipped: return "Skipped, the installer was already on this Mac"
         case .pending: return "Not started"
         }
     }

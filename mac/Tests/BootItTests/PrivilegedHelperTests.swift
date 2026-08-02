@@ -162,3 +162,35 @@ final class CompletionActionTests: XCTestCase {
         }
     }
 }
+
+/// A ring reading 2% underneath a green-ticked "Downloading macOS" reads as a
+/// bar that reset. The download either happened or it didn't; the checklist has
+/// to say which.
+final class SkippedPhaseTests: XCTestCase {
+
+    private func macModel(skipped: Bool) -> AppModel {
+        let model = AppModel()
+        model.platform = .macos
+        model.source = .download
+        model.downloadSkipped = skipped
+        model.currentPhase = .preparing
+        return model
+    }
+
+    func testSkippedDownloadIsNotReportedAsCompleted() {
+        XCTAssertEqual(macModel(skipped: true).state(of: .downloading), .skipped)
+    }
+
+    func testRealDownloadStillCompletesNormally() {
+        XCTAssertEqual(macModel(skipped: false).state(of: .downloading), .done)
+    }
+
+    func testSkippedSurvivesTheFinishedBuild() {
+        // `state(of:)` short-circuits everything to .done once the build ends,
+        // which would quietly re-assert that a skipped download had happened.
+        let model = macModel(skipped: true)
+        model.step = .done
+        XCTAssertEqual(model.state(of: .downloading), .skipped)
+        XCTAssertEqual(model.state(of: .preparing), .done)
+    }
+}

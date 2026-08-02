@@ -75,6 +75,8 @@ final class AppModel: ObservableObject {
     /// Set once the finished drive has actually been ejected, so the completion
     /// step can stop telling the user to do something they have already done.
     @Published var driveEjected = false
+    /// True when the installer was already in /Applications and no download ran.
+    @Published var downloadSkipped = false
 
     // Presentation-only disclosure state
     @Published var showsAdvancedWindowsOptions = false
@@ -139,6 +141,10 @@ final class AppModel: ObservableObject {
     }
 
     func state(of phase: WritePhase) -> PhaseState {
+        // Checked before the .done shortcut: a skipped download is still skipped
+        // after the build finishes, and claiming otherwise on the summary would
+        // be the same lie a beat later.
+        if phase == .downloading, downloadSkipped { return .skipped }
         if step == .done { return .done }
         let planned = plannedPhases
         guard let current = currentPhase,
@@ -409,9 +415,11 @@ final class AppModel: ObservableObject {
                 onLog: { self.log($0) })
             let source = try dl.download(version: version)
             installerApp = source.path
-            // An installer already on disk costs no time, so it must not consume
-            // half the bar — otherwise the ring reads 51% the instant the erase
-            // starts and the real work is crammed into what's left.
+            // A download that happened owns the first half of the ring. One that
+            // was skipped owns none of it — and the checklist says "Skipped"
+            // rather than ticking green, so a bar at 2% is not contradicted by a
+            // completed stage sitting above it.
+            onMain { self.downloadSkipped = source.reused }
             writeBase = source.reused ? 0.0 : 0.5
         } else {
             installerApp = request.macApp

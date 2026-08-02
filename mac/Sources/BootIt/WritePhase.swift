@@ -39,11 +39,18 @@ enum WritePhase: String, CaseIterable, Identifiable {
 }
 
 /// Where a phase sits relative to the one running now.
-enum PhaseState {
+enum PhaseState: Equatable {
     case done
     case active
     /// The phase that was running when the build stopped. Without this the
     /// checklist shows a failed stage as still in progress.
     case failed
+    /// Planned, but there turned out to be nothing to do — the installer was
+    /// already on the Mac, so no download happened.
+    ///
+    /// Distinct from `.done` on purpose. Ticking a skipped stage green makes the
+    /// progress ring look broken: the user sees a completed stage sitting above
+    /// a bar reading 2%, and reasonably concludes the bar reset.
+    case skipped
     case pending
 }
