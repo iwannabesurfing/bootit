@@ -40,6 +40,12 @@ struct CompletionStepView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Next steps").font(.headline)
+                // The drive is still mounted on *this* Mac at this point, so
+                // "plug it into the target Mac" was skipping the step that
+                // protects the thing we just spent fifteen minutes writing.
+                if !model.driveEjected {
+                    Bullet("Eject the drive before unplugging it")
+                }
                 if isMac {
                     Bullet("Plug the USB into the target Mac")
                     Bullet("Hold the power button (Apple silicon) or ⌥ Option (Intel) at startup")
@@ -52,16 +58,14 @@ struct CompletionStepView: View {
             }
             .frame(maxWidth: 420, alignment: .leading)
 
-            if let drive = model.selectedDrive {
-                Button {
-                    model.eject(drive)
-                } label: {
-                    Label("Eject Drive", systemImage: "eject")
-                }
-                .accessibilityIdentifier("eject-button")
-                if let ejectError = model.ejectError {
-                    Text(ejectError).font(.footnote).foregroundStyle(.secondary)
-                }
+            if model.driveEjected {
+                Label("Safe to unplug", systemImage: "checkmark.circle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("ejected-confirmation")
+            }
+            if let ejectError = model.ejectError {
+                Text(ejectError).font(.footnote).foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity)

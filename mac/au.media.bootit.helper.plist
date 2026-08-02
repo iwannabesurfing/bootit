@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  LaunchDaemon for BootIt's privileged helper.
+
+  Copied into BootIt.app/Contents/Library/LaunchDaemons/ by build.sh and
+  registered at runtime with SMAppService. The filename, the Label and the
+  MachServices key must all match HelperInfo in Sources/BootItShared.
+
+  There is deliberately no RunAtLoad or KeepAlive: launchd starts the helper
+  only when the app opens the Mach service, and lets it exit in between. A root
+  daemon that is not running is a root daemon that cannot be attacked.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>au.media.bootit.helper</string>
+
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/BootItHelper</string>
+
+	<key>MachServices</key>
+	<dict>
+		<key>au.media.bootit.helper</key>
+		<true/>
+	</dict>
+
+	<!-- Ties the daemon to BootIt in System Settings, so the user sees one
+	     entry named after the app rather than an opaque bundle identifier. -->
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>au.media.bootit</string>
+	</array>
+</dict>
+</plist>

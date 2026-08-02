@@ -72,6 +72,9 @@ final class AppModel: ObservableObject {
     @Published var diskIndex: Int?
     @Published var refreshingDisks = false
     @Published var ejectError: String?
+    /// Set once the finished drive has actually been ejected, so the completion
+    /// step can stop telling the user to do something they have already done.
+    @Published var driveEjected = false
 
     // Presentation-only disclosure state
     @Published var showsAdvancedWindowsOptions = false
@@ -258,6 +261,7 @@ final class AppModel: ObservableObject {
                 self.ejectError = result.ok
                     ? nil
                     : "Couldn't eject \(drive.name) — a file on it may still be open."
+                self.driveEjected = result.ok
             }
         }
     }
@@ -403,8 +407,12 @@ final class AppModel: ObservableObject {
                 cancel: cancelFlag,
                 onProgress: { frac, status in self.setProgress(frac * 0.5, status) },
                 onLog: { self.log($0) })
-            installerApp = try dl.download(version: version)
-            writeBase = 0.5
+            let source = try dl.download(version: version)
+            installerApp = source.path
+            // An installer already on disk costs no time, so it must not consume
+            // half the bar — otherwise the ring reads 51% the instant the erase
+            // starts and the real work is crammed into what's left.
+            writeBase = source.reused ? 0.0 : 0.5
         } else {
             installerApp = request.macApp
             log("Using installer:\n\(request.macApp)")

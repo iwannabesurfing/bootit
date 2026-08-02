@@ -118,10 +118,18 @@ struct RootView: View {
                 .disabled(!model.isPrimaryActionEnabled)
                 .accessibilityIdentifier("cancel-button")
         case .done:
-            Button(model.primaryActionTitle) { NSApp.terminate(nil) }
-                .buttonStyle(.borderedProminent).tint(Theme.accent)
-                .keyboardShortcut(.defaultAction)
-                .accessibilityIdentifier("quit-button")
+            // Eject first, quit second. Return lands on the safe action while
+            // the drive is still mounted, and only becomes "leave" afterwards.
+            Button(model.primaryActionTitle) {
+                if model.driveEjected {
+                    NSApp.terminate(nil)
+                } else if let drive = model.selectedDrive {
+                    model.eject(drive)
+                }
+            }
+            .buttonStyle(.borderedProminent).tint(Theme.accent)
+            .keyboardShortcut(.defaultAction)
+            .accessibilityIdentifier(model.driveEjected ? "done-button" : "eject-primary-button")
         default:
             Button { model.primaryAction() } label: {
                 if model.step == .options, model.loadingCatalog {

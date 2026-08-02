@@ -1,6 +1,19 @@
+import AppKit
 import SwiftUI
 
+/// Closing the window quits.
+///
+/// BootIt removes the New Window command, so without this, closing the last
+/// window leaves a running app with no way to get a window back — visible in the
+/// Dock and the ⌘-Tab switcher, doing nothing. That was the reason the final
+/// step had to offer "Quit" as its primary button; with this in place, the
+/// button can be the thing the user actually wants next.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+}
+
 struct BootItApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()
 
     static let repository = URL(string: "https://github.com/iwannabesurfing/bootit")
@@ -18,6 +31,10 @@ struct BootItApp: App {
             CommandGroup(replacing: .newItem) {}
 
             CommandGroup(replacing: .help) {
+                // A root daemon the user cannot see or remove from the app that
+                // installed it would be indefensible; this is that door.
+                Button("Privileged Helper…") { openHelperWindow() }
+                Divider()
                 if let repository = Self.repository {
                     Link("BootIt on GitHub", destination: repository)
                 }
@@ -26,5 +43,15 @@ struct BootItApp: App {
                 }
             }
         }
+
+        Window("Privileged Helper", id: Self.helperWindowID) {
+            HelperStatusView()
+        }
+        .windowResizability(.contentSize)
     }
+
+    static let helperWindowID = "helper-status"
+
+    @Environment(\.openWindow) private var openWindow
+    private func openHelperWindow() { openWindow(id: Self.helperWindowID) }
 }

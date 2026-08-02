@@ -109,7 +109,10 @@ extension AppModel {
         // Once a build has stopped there is nothing left to cancel, and leaving
         // a dead Cancel button as the only action strands the user.
         case .progress: return runError == nil ? "Cancel" : "Start Over"
-        case .done:     return "Quit"
+        // Quit is not what someone wants next — the drive is still mounted and
+        // pulling it out unejected risks the thing they just spent 15 minutes
+        // making. Offer the real next action, and only then a way to leave.
+        case .done:     return driveEjected ? "Done" : "Eject Drive"
         }
     }
 

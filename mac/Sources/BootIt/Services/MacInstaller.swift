@@ -61,7 +61,6 @@ enum MacInstallerError: LocalizedError {
     case createMediaToolMissing
     case eraseFailed(String)
     case createMediaFailed(String)
-    case authCancelled
 
     var errorDescription: String? {
         switch self {
@@ -76,8 +75,6 @@ enum MacInstallerError: LocalizedError {
         case .eraseFailed(let m):   return "Failed to format the USB drive:\n\(m)"
         case .createMediaFailed(let m):
             return "createinstallmedia failed:\n\(m)"
-        case .authCancelled:
-            return "Administrator authorisation was cancelled — the macOS installer needs it to erase and write the drive."
         }
     }
 }
@@ -186,16 +183,28 @@ final class MacInstaller {
 
     // MARK: - Download
 
+    /// Where the installer came from. `reused` matters to the caller because a
+    /// download that never happened must not still claim half of the progress
+    /// bar — that is what made the ring sit at 51% while the drive was being
+    /// erased, having "downloaded" 18 GB in under a second.
+    struct InstallerSource {
+        let path: String
+        let reused: Bool
+    }
+
     /// Download a macOS installer to /Applications via softwareupdate, then
     /// return the path to the resulting "Install macOS *.app".
-    func download(version: String) throws -> String {
+    func download(version: String) throws -> InstallerSource {
         // Re-fetching ~18 GB that is already sitting in /Applications helps
         // nobody, and it is the step that triggers the installer assistant.
         if let existing = Self.installedInstaller(forVersion: version) {
             onLog("\(existing.lastPathComponent) (macOS \(version)) is already in /Applications — "
                 + "using it instead of downloading it again.")
-            onProgress(1.0, "Using the installer already on this Mac")
-            return existing.path
+            // Not 1.0: reporting the download as "complete" drives the bar to
+            // the top of the download's half of the range and leaves it there —
+            // the run visibly starts at 50% and the write has nowhere to go.
+            onProgress(0, "Using the installer already on this Mac")
+            return InstallerSource(path: existing.path, reused: true)
         }
 
         onLog("Downloading macOS \(version) from Apple — this is a large download (~12–18 GB).")
@@ -224,7 +233,7 @@ final class MacInstaller {
             throw MacInstallerError.installerAppNotFound
         }
         onLog("Downloaded: \(app.lastPathComponent)")
-        return app.path
+        return InstallerSource(path: app.path, reused: false)
     }
 
     // MARK: - Write
@@ -239,138 +248,77 @@ final class MacInstaller {
         if Self.closeInstallerAssistant() {
             onLog("Closed the macOS installer window that opened itself.")
         }
+        // Runs on the way out however this ends. Cleaning up only on success is
+        // what left a stray /Volumes/Shared Support behind after the last two
+        // failed runs — the failure path is exactly when it gets abandoned.
+        defer { Self.unmountInstallerSupport() }
         try check()
+
+        // Everything privileged happens in the daemon from here on. Route its
+        // progress into the same callbacks the rest of the flow already uses.
+        PrivilegedHelper.shared.setHandlers(
+            onLog: { [onLog] line in onLog(line) },
+            onProgress: { [onProgress] fraction, status in onProgress(fraction, status) })
         onPhase(.preparing)
+        onLog("Checking BootIt's privileged helper…")
+        try PrivilegedHelper.shared.ensureReady()
+
+        try check()
         try eraseToMac(disk)
         try check()
         onPhase(.creatingInstaller)
         onLog("Writing the installer with createinstallmedia (this takes 10–20 minutes)…")
-        try runCreateInstallMedia(tool: tool)
+        try runCreateInstallMedia(installerAppPath: installerAppPath)
         onProgress(1.0, "Done")
         onLog("✅  macOS installer USB is ready.")
     }
 
-    private func eraseToMac(_ disk: String) throws {
-        onLog("Erasing \(disk) → Mac OS Extended (Journaled) / GPT…")
-        onProgress(0.02, "Erasing USB…")
-        Shell.run(Self.diskutil, ["unmountDisk", "force", disk])
+    /// `softwareupdate` and the install assistant leave the installer's
+    /// SharedSupport image mounted. Two sessions in a row have ended with a
+    /// stray `/Volumes/Shared Support`, so clean it up rather than leave it.
+    static func unmountInstallerSupport() {
+        for volume in ["/Volumes/Shared Support"]
+        where FileManager.default.fileExists(atPath: volume) {
+            Shell.run("/usr/bin/hdiutil", ["detach", volume, "-quiet"])
+        }
+    }
 
-        let erase = Shell.run(Self.diskutil, ["eraseDisk", "JHFS+", Self.eraseName, "GPT", disk])
-        if !erase.ok {
-            // `eraseDisk` keeps the existing partition scheme, which fails with
-            // -69850 ("chosen size is not valid") on drives that already carry a
-            // bootable or cloned layout — including one BootIt itself wrote
-            // earlier. `partitionDisk` replaces the scheme outright, so it gets
-            // past exactly the case a retry of the same command cannot.
-            onLog("Erase failed; rewriting the partition scheme and retrying…")
-            Shell.run(Self.diskutil, ["unmountDisk", "force", disk])
-            let repartition = Shell.run(
-                Self.diskutil, ["partitionDisk", disk, "GPT", "JHFS+", Self.eraseName, "100%"])
-            guard repartition.ok else {
-                let detail = [erase.err.isEmpty ? erase.out : erase.err,
-                              repartition.err.isEmpty ? repartition.out : repartition.err]
-                    .filter { !$0.isEmpty }.joined(separator: "\n")
+    /// BSD name only ("disk4"), which is what the helper's own guard expects.
+    private static func bsdName(_ disk: String) -> String {
+        disk.hasPrefix("/dev/") ? String(disk.dropFirst(5)) : disk
+    }
+
+    private func eraseToMac(_ disk: String) throws {
+        do {
+            try PrivilegedHelper.shared.erase(disk: Self.bsdName(disk),
+                                              volumeName: Self.eraseName)
+        } catch let error as HelperError {
+            if case .operationFailed(let detail) = error {
                 throw MacInstallerError.eraseFailed(detail)
             }
+            throw error
         }
-        onLog("Formatted.")
-        onProgress(0.05, "Formatted")
     }
 
-    /// Run createinstallmedia as root via the system admin prompt, streaming
-    /// progress from a temp log file while the privileged command runs.
-    private func runCreateInstallMedia(tool: String) throws {
-        let tmp = NSTemporaryDirectory()
-        let progLog = tmp + "bootit_cim_\(UUID().uuidString).log"
-        let scriptPath = tmp + "bootit_cim_\(UUID().uuidString).sh"
-        FileManager.default.createFile(atPath: progLog, contents: nil)
-
-        let script = """
-        #!/bin/sh
-        "\(tool)" --volume "/Volumes/\(Self.eraseName)" --nointeraction > "\(progLog)" 2>&1
-        """
-        try script.write(toFile: scriptPath, atomically: true, encoding: .utf8)
-        defer {
-            try? FileManager.default.removeItem(atPath: scriptPath)
-            try? FileManager.default.removeItem(atPath: progLog)
-        }
-
-        // Poll the log for progress while the privileged command runs.
-        let pollStop = CancelFlag()
-        DispatchQueue(label: "bootit.cim.poll").async {
-            while !pollStop.isCancelled {
-                if let txt = try? String(contentsOfFile: progLog, encoding: .utf8) {
-                    self.reportCreateMediaProgress(txt)
-                }
-                Thread.sleep(forTimeInterval: 0.5)
+    /// Hand `createinstallmedia` to the privileged daemon, which streams its
+    /// output back over XPC.
+    ///
+    /// This used to write a shell script to the temp directory and run it via
+    /// `osascript … with administrator privileges`. That got root, but root was
+    /// not enough: TCC judges removable-volume access by the responsible
+    /// process, which was this app, so the write died with EPERM on
+    /// `.IAPhysicalMedia` and left an unbootable half-written drive.
+    private func runCreateInstallMedia(installerAppPath: String) throws {
+        do {
+            try PrivilegedHelper.shared.createInstallMedia(installerAppPath: installerAppPath,
+                                                           volumeName: Self.eraseName)
+        } catch let error as HelperError {
+            if case .operationFailed(let detail) = error {
+                throw MacInstallerError.createMediaFailed(detail)
             }
+            throw error
         }
-
-        // macOS attributes this dialog to the process that asks, which is the
-        // osascript helper rather than BootIt. Saying so up front is better than
-        // letting an unexplained "osascript wants to make changes" appear.
-        onLog("Authorising… macOS will ask for your administrator password. "
-            + "The dialog is titled “osascript” — that's the helper BootIt uses to run "
-            + "Apple's createinstallmedia as root.")
-        let result = runWithAdmin(scriptPath: scriptPath)
-        pollStop.cancel()
-
-        let finalLog = (try? String(contentsOfFile: progLog, encoding: .utf8)) ?? ""
-        if result.cancelled { throw MacInstallerError.authCancelled }
-        guard result.ok else {
-            if !finalLog.isEmpty { onLog(finalLog) }
-            throw MacInstallerError.createMediaFailed(result.message)
-        }
-        if finalLog.contains("Install media now available") {
-            onLog("Install media now available.")
-        }
-    }
-
-    private struct AdminResult {
-        let ok: Bool
-        let cancelled: Bool
-        let message: String
-    }
-
-    /// Run a shell script as root using the native AppleScript admin prompt.
-    private func runWithAdmin(scriptPath: String) -> AdminResult {
-        let apple = "do shell script \"/bin/sh '\(scriptPath)'\" with administrator privileges"
-        let r = Shell.run("/usr/bin/osascript", ["-e", apple])
-        if r.code == 0 { return AdminResult(ok: true, cancelled: false, message: r.out) }
-        let err = (r.err + r.out).lowercased()
-        if err.contains("-128") || err.contains("user canceled") || err.contains("user cancelled") {
-            return AdminResult(ok: false, cancelled: true, message: r.err)
-        }
-        return AdminResult(ok: false, cancelled: false, message: r.err.isEmpty ? r.out : r.err)
-    }
-
-    private var lastReportedFraction = -1.0
-    private func reportCreateMediaProgress(_ text: String) {
-        if text.contains("Install media now available") {
-            onProgress(1.0, "Install media ready"); return
-        }
-        let copying = text.contains("Copying to disk") || text.contains("Copying boot files")
-        let phase: String
-        if copying {
-            phase = "Copying macOS to the drive…"
-        } else if text.contains("Making disk bootable") {
-            phase = "Making the drive bootable…"
-        } else if text.contains("Erasing") {
-            phase = "Erasing the drive…"
-        } else {
-            phase = "Working…"
-        }
-
-        var fraction = 0.06
-        if let p = Self.lastPercent(text) {
-            fraction = copying ? 0.10 + Double(p) / 100 * 0.85
-                               : Double(p) / 100 * 0.10
-        }
-        fraction = min(fraction, 0.97)
-        if abs(fraction - lastReportedFraction) >= 0.005 || fraction >= 0.97 {
-            lastReportedFraction = fraction
-            onProgress(fraction, phase)
-        }
+        onLog("Install media now available.")
     }
 
     private func check() throws {
@@ -385,9 +333,5 @@ final class MacInstaller {
 
     private static func firstPercent(_ s: String) -> Int? {
         RegexCache.firstCapture(s, #"(\d+(?:\.\d+)?)%"#).map { Int(Double($0) ?? 0) }
-    }
-
-    private static func lastPercent(_ s: String) -> Int? {
-        RegexCache.lastCapture(s, #"(\d+)%"#).flatMap { Int($0) }
     }
 }

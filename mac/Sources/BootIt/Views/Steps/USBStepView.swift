@@ -29,10 +29,11 @@ struct USBStepView: View {
 
                 if model.platform == .macos {
                     StatusBanner(.information,
-                                 title: "You'll be asked for your password",
-                                 message: "Apple's createinstallmedia has to run as root. macOS labels "
-                                        + "that prompt “osascript”, which is the helper BootIt uses to "
-                                        + "run it — your password is never seen or stored by this app.")
+                                 title: "macOS will ask you to approve BootIt once",
+                                 message: "Apple's createinstallmedia has to run with system privileges. "
+                                        + "The first time, macOS asks you to allow BootIt to run a "
+                                        + "background helper — the prompt names BootIt. After that it "
+                                        + "won't ask again, and your password is never seen by this app.")
                 }
             }
 

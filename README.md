@@ -112,11 +112,41 @@ than CI tests (Microsoft rate-limits per IP — see below):
 | Step | Tool | What happens |
 |------|------|--------------|
 | 1 | `softwareupdate` | List/download the installer to /Applications (or use an existing one) |
-| 2 | `diskutil eraseDisk` | Format the USB as Mac OS Extended (Journaled) + GPT |
-| 3 | `createinstallmedia` | Erase + write the installer **(asks for your admin password)** |
+| 2 | `diskutil eraseDisk` | Format the USB as Mac OS Extended (Journaled) + GPT — run by the helper |
+| 3 | `createinstallmedia` | Write the installer — run by the helper |
 
-The macOS step needs administrator rights — the app uses the standard system
-password prompt; it does not store or handle your password.
+### The privileged helper, and the one thing you have to allow
+
+`createinstallmedia` is Apple's tool and it has to run as root. BootIt does that
+through a small **LaunchDaemon** registered with `SMAppService`, talking to the
+app over XPC. Both ends pin each other's code signature, so nothing but a
+BootIt signed by this team can ask the daemon to erase a disk. The daemon exits
+30 seconds after the app stops talking to it, and **Help → Privileged Helper…**
+will remove it entirely.
+
+macOS asks you for two separate things, and they are not the same permission:
+
+| What | When you're asked | If it's missing |
+|------|-------------------|-----------------|
+| **Allow BootIt in the Background** | Automatically, first run | The helper never installs |
+| **Full Disk Access** | **Never — you have to grant it** | `createinstallmedia` fails with "Operation not permitted" |
+
+The second one is the trap. TCC gates writes to removable volumes, and
+`createinstallmedia` writes a `.IAPhysicalMedia` cookie to the root of the USB.
+A background daemon has no GUI session, so macOS **never prompts it** — it is
+denied silently, and the failure surfaces fifteen minutes later as an opaque
+`NSCocoaErrorDomain Code=513 / errno 1` at the bless step.
+
+So, once: **System Settings → Privacy & Security → Full Disk Access → +  → BootIt**.
+
+**Help → Privileged Helper… → Test USB Access** performs the exact syscall that
+fails and reports which side is blocked — the app or the daemon. They are
+governed by different rules and produce an identical `EPERM`, which is precisely
+why this is worth measuring instead of guessing. BootIt also probes for the
+denial *before* erasing, so a missing grant can never cost you the drive's
+contents.
+
+No password prompt, on any run. Nothing is typed into BootIt.
 
 ---
 
