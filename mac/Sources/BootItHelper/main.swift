@@ -76,6 +76,14 @@ private final class ToolRunner {
     }
 }
 
+/// A thread-safe one-way flag, for stopping the copy poller.
+private final class CancelBox {
+    private let lock = NSLock()
+    private var value = false
+    func set() { lock.lock(); value = true; lock.unlock() }
+    var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
+}
+
 private final class HelperService: NSObject, HelperProtocol {
 
     private static let diskutil = "/usr/sbin/diskutil"
@@ -197,6 +205,15 @@ private final class HelperService: NSObject, HelperProtocol {
             return
         }
 
+        // createinstallmedia renames the volume mid-run, so follow the device
+        // rather than the path, and estimate the payload before it starts.
+        let disk = Self.wholeDisk(hosting: volume)
+        let expected = Self.expectedPayloadBytes(installerAppPath: installerAppPath)
+        let stopPolling = Self.startCopyPolling(disk: disk, expected: expected) { [weak self] fraction, status in
+            self?.reportMeasured(fraction, status)
+        }
+        defer { stopPolling() }
+
         var tail: [String] = []
         let code = runner.run(tool, ["--volume", volume, "--nointeraction"]) { [weak self] line in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -218,6 +235,19 @@ private final class HelperService: NSObject, HelperProtocol {
     // MARK: - Progress
 
     private var lastFraction = -1.0
+    /// `lastFraction` is now written from two threads — the output reader and
+    /// the byte poller — so the monotonic check and the update have to be one
+    /// atomic step, or a slow poll can undo a newer value.
+    private let fractionLock = NSLock()
+
+    /// Advance to `fraction` if it is ahead of where the bar already is.
+    private func advance(to fraction: Double) -> Bool {
+        fractionLock.lock()
+        defer { fractionLock.unlock() }
+        guard fraction > lastFraction else { return false }
+        lastFraction = fraction
+        return true
+    }
 
     /// Map createinstallmedia's chatter onto the 0.05…1.0 slice the erase left.
     ///
@@ -225,9 +255,75 @@ private final class HelperService: NSObject, HelperProtocol {
     /// own phases, and a bar that snaps backwards reads as a fault.
     private func report(_ line: String) {
         guard let fraction = InstallMediaProgress.fraction(for: line),
-              fraction > lastFraction else { return }
-        lastFraction = fraction
+              advance(to: fraction) else { return }
         progress(fraction, InstallMediaProgress.status(for: line))
+    }
+
+    /// Progress derived from bytes on the drive rather than from output.
+    /// Shares `lastFraction` with `report` so the two sources cannot fight and
+    /// send the bar backwards.
+    private func reportMeasured(_ fraction: Double, _ status: String) {
+        guard advance(to: fraction) else { return }
+        progress(fraction, status)
+    }
+
+    // MARK: - Measured copy progress
+    //
+    // The copy phase prints no percentages, so the only honest signal is how
+    // much has actually landed on the drive. Polling the target volume's used
+    // space gives a bar that moves continuously for the fifteen minutes during
+    // which createinstallmedia says nothing at all.
+
+    /// Poll the target volume's used space until the returned closure is called.
+    static func startCopyPolling(disk: String?,
+                                 expected: Int64,
+                                 report: @escaping (Double, String) -> Void) -> () -> Void {
+        guard let disk else { return {} }
+        let stopped = CancelBox()
+        DispatchQueue.global(qos: .utility).async {
+            while !stopped.isSet {
+                if let used = volumeUsedBytes(onDisk: disk), used > 0 {
+                    report(InstallMediaProgress.copyFraction(used: used, expected: expected),
+                           InstallMediaProgress.copyStatus(used: used, expected: expected))
+                }
+                Thread.sleep(forTimeInterval: 2)
+            }
+        }
+        return { stopped.set() }
+    }
+
+    /// Bytes in use on whichever volume is currently mounted from `disk`.
+    ///
+    /// Resolved fresh every poll because createinstallmedia renames the volume
+    /// partway through — "MACINSTALL" becomes "Install macOS Tahoe", and a path
+    /// captured at the start stops existing exactly when the copy gets going.
+    static func volumeUsedBytes(onDisk disk: String) -> Int64? {
+        guard let path = mountedVolume(onDisk: disk) else { return nil }
+        var stats = statfs()
+        guard statfs(path, &stats) == 0 else { return nil }
+        let block = Int64(stats.f_bsize)
+        let used = Int64(stats.f_blocks) - Int64(stats.f_bfree)
+        return used * block
+    }
+
+    /// The whole-disk BSD name currently backing `volumePath` ("disk4s2" → "disk4").
+    static func wholeDisk(hosting volumePath: String) -> String? {
+        guard let node = deviceNode(forVolume: volumePath) else { return nil }
+        guard let range = node.range(of: #"^disk\d+"#, options: .regularExpression) else { return nil }
+        return String(node[range])
+    }
+
+    /// Rough size of what createinstallmedia will copy.
+    ///
+    /// SharedSupport.dmg is nearly all of it; the multiplier covers the app
+    /// itself and the RecoveryOS. Deliberately an estimate — the bar is capped
+    /// short of the end and only the completion line finishes it, so being wrong
+    /// by a gigabyte changes the pace slightly and nothing else.
+    static func expectedPayloadBytes(installerAppPath: String) -> Int64 {
+        let dmg = installerAppPath + "/Contents/SharedSupport/SharedSupport.dmg"
+        let attributes = try? FileManager.default.attributesOfItem(atPath: dmg)
+        guard let size = attributes?[.size] as? Int64, size > 0 else { return 16_000_000_000 }
+        return Int64(Double(size) * 1.2)
     }
 
     // MARK: - Removable-volume access

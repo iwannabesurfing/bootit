@@ -95,31 +95,30 @@ final class InstallMediaProgressTests: XCTestCase {
         XCTAssertNil(InstallMediaProgress.lastPercent(""))
     }
 
-    func testCopyingDominatesTheBar() {
-        // Erasing is quick; copying is the multi-gigabyte phase. If they shared
-        // the range evenly the bar would race to half and then crawl.
-        let erasing = try? XCTUnwrap(InstallMediaProgress.fraction(for: "Erasing disk: 100%"))
-        let copyingStart = try? XCTUnwrap(InstallMediaProgress.fraction(for: "Copying to disk: 0%"))
-        let copyingEnd = try? XCTUnwrap(InstallMediaProgress.fraction(for: "Copying to disk: 100%"))
-
-        XCTAssertEqual(erasing ?? 0, 0.15, accuracy: 0.001)
-        XCTAssertEqual(copyingStart ?? 0, 0.15, accuracy: 0.001)
-        XCTAssertEqual(copyingEnd ?? 0, 1.0, accuracy: 0.001)
+    func testEraseOwnsOnlyTheOpeningSliver() {
+        // Erasing is quick; it must not eat a share of the bar proportional to
+        // the number of stages, or the copy has nowhere to go.
+        XCTAssertEqual(InstallMediaProgress.fraction(for: "Erasing disk: 0%") ?? 0,
+                       0.05, accuracy: 0.001)
+        XCTAssertEqual(InstallMediaProgress.fraction(for: "Erasing disk: 0%... 100%") ?? 0,
+                       InstallMediaProgress.copyStart, accuracy: 0.001)
     }
 
-    func testProgressAdvancesAcrossARealisticRun() {
+    func testRealTahoeTranscriptNeverGoesBackwards() {
+        // Verbatim from a real macOS 26.6 run. Note that the copy phase — the
+        // fifteen-minute part — contributes no numbers at all.
         let transcript = [
-            "Erasing disk: 0%... 10%... 50%...",
-            "Erasing disk: 0%... 10%... 50%... 100%",
-            "Copying to disk: 0%... 10%...",
-            "Copying to disk: 0%... 10%... 60%...",
-            "Copying to disk: 0%... 100%",
+            "Erasing disk: 0%... 10%... 20%... 30%... 100%",
+            "Copying essential files...",
+            "Copying the macOS RecoveryOS...",
+            "Making disk bootable...",
             "Install media now available at \"/Volumes/Install macOS Tahoe\""
         ]
         let fractions = transcript.compactMap { InstallMediaProgress.fraction(for: $0) }
-        XCTAssertEqual(fractions.count, transcript.count, "every line should move the bar")
         XCTAssertEqual(fractions, fractions.sorted(), "progress must never go backwards")
         XCTAssertEqual(fractions.last, 1.0)
+        // Three of the five lines say nothing about progress; that is the point.
+        XCTAssertEqual(fractions.count, 3)
     }
 
     func testLinesWithoutProgressLeaveTheBarAlone() {
@@ -192,5 +191,57 @@ final class SkippedPhaseTests: XCTestCase {
         model.step = .done
         XCTAssertEqual(model.state(of: .downloading), .skipped)
         XCTAssertEqual(model.state(of: .preparing), .done)
+    }
+}
+
+/// createinstallmedia on macOS 26 prints no percentages during the copy — the
+/// bar has to be driven by bytes landing on the drive instead.
+final class MeasuredCopyProgressTests: XCTestCase {
+
+    func testCopyPhaseLinesCarryNoPercentage() {
+        // This is the whole reason output parsing cannot drive the copy.
+        for line in ["Copying essential files...",
+                     "Copying the macOS RecoveryOS..."] {
+            XCTAssertNil(InstallMediaProgress.lastPercent(line))
+            XCTAssertNil(InstallMediaProgress.fraction(for: line),
+                         "\(line) must leave the bar to the byte poller")
+        }
+    }
+
+    func testEraseStillMapsIntoTheOpeningSliver() {
+        XCTAssertEqual(InstallMediaProgress.fraction(for: "Erasing disk: 0%") ?? 0,
+                       0.05, accuracy: 0.001)
+        XCTAssertEqual(InstallMediaProgress.fraction(for: "Erasing disk: 0%... 100%") ?? 0,
+                       InstallMediaProgress.copyStart, accuracy: 0.001)
+    }
+
+    func testCopyFractionSpansTheBulkOfTheBar() {
+        let start = InstallMediaProgress.copyFraction(used: 1, expected: 20_000_000_000)
+        let half = InstallMediaProgress.copyFraction(used: 10_000_000_000, expected: 20_000_000_000)
+        let full = InstallMediaProgress.copyFraction(used: 20_000_000_000, expected: 20_000_000_000)
+
+        XCTAssertEqual(start, InstallMediaProgress.copyStart, accuracy: 0.01)
+        XCTAssertEqual(full, InstallMediaProgress.copyCeiling, accuracy: 0.001)
+        XCTAssertTrue(half > start && half < full)
+    }
+
+    func testAnUnderestimateCannotFinishTheBarEarly() {
+        // `expected` is an estimate. If the payload runs over, the bar must stop
+        // short and wait for the completion line rather than sit at 100%.
+        let over = InstallMediaProgress.copyFraction(used: 40_000_000_000, expected: 20_000_000_000)
+        XCTAssertEqual(over, InstallMediaProgress.copyCeiling, accuracy: 0.001)
+        XCTAssertLessThan(over, 1.0)
+        XCTAssertEqual(InstallMediaProgress.fraction(for: "Install media now available"), 1.0)
+    }
+
+    func testZeroExpectedDoesNotDivideByZero() {
+        XCTAssertEqual(InstallMediaProgress.copyFraction(used: 5, expected: 0),
+                       InstallMediaProgress.copyStart, accuracy: 0.001)
+    }
+
+    func testCopyStatusShowsPercentAndGigabytes() {
+        let status = InstallMediaProgress.copyStatus(used: 10_000_000_000, expected: 20_000_000_000)
+        XCTAssertTrue(status.contains("50%"), status)
+        XCTAssertTrue(status.contains("10.0 GB"), status)
     }
 }
