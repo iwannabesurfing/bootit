@@ -5,7 +5,7 @@
 **Commits:** `deb1a76` "Run createinstallmedia from a privileged helper, and make the
 macOS path work", `5c456c6` "Say Skipped when no download happened".
 
-**Local:** 81 tests, 0 failures; SwiftLint strict 0 violations, 33 files. Signed release
+**Local:** 87 tests, 0 failures; SwiftLint strict 0 violations, 33 files. Signed release
 build installed to `/Applications/BootIt.app`.
 
 ### The headline
@@ -53,6 +53,28 @@ build directory has no stable identity for TCC to attach one to.
   reports which one is refused.
 - **Probes before erasing.** A missing grant now costs a message, not the drive's contents.
 
+### The progress bar: measured, not parsed
+
+`createinstallmedia` on macOS 26 emits percentages for the **erase only**. The entire
+copy — the multi-gigabyte, fifteen-minute part — prints three lines and no numbers:
+
+    Erasing disk: 0%... 10%... 20%... 30%... 100%
+    Copying essential files...
+    Copying the macOS RecoveryOS...
+    Making disk bootable...
+
+Older macOS printed `Copying to disk: 0%...100%`, which is what the mapping assumed. So
+no amount of output parsing could move that bar — the information is not in the output.
+The daemon now polls the target volume's used bytes (`statfs`, every 2 s) and maps that
+onto 15% -> 93%, following the **device** rather than the path, because the volume is
+renamed from `MACINSTALL` to `Install macOS Tahoe` partway through. Payload size is
+estimated from `SharedSupport.dmg` x 1.2; the bar is capped at 93% so only the completion
+line finishes it, since an estimate that runs short would otherwise sit at 100% for
+minutes — the same "is it stuck?" failure in a different costume.
+
+`lastFraction` is now written by both the output reader and the poller, so
+compare-and-advance is a single locked step.
+
 ### Bugs a real run exposed
 
 - **Progress froze at 50% for an entire 20-minute write.** The daemon held its callback
@@ -93,9 +115,10 @@ button exists so that is never guessed at again.
 
 ### Next session should start with
 
-1. **Confirm the progress ring live** — the callback fix is proven (2% → 5% and daemon log
-   lines now reach the UI), but no completed run has yet exercised the copy phase climbing
-   15% → 100%.
+1. **Confirm the measured copy progress live.** The callback fix and the last-percent
+   parser are both proven on screen (2% → 5% → 15%, and `Erasing disk: … 100%` read
+   correctly). The byte poller that drives 15% → 93% has never run — it was written while
+   the verifying run was still in flight, so it is tested but unobserved.
 2. **Version bump + tag.** GitHub still has v3.1.0, whose macOS path cannot work. This
    release matters more than the UI redesign did.
 3. **First-run FDA guidance.** The grant is documented and detected, but a new user still
@@ -107,6 +130,8 @@ button exists so that is never guessed at again.
 [promote-spine: an autoreleased XPC remoteObjectProxy stored in a `weak var` is nil before the first callback — the channel goes silent with no error at all, which reads as "the work is stuck" rather than "the callbacks are gone"]
 
 [promote-profile:swift: a launchd daemon with no idle-exit stays resident across app updates and keeps answering from the old binary — an on-demand SMAppService helper should exit when idle or a stale build will serve requests indefinitely]
+
+[promote-spine: a CLI's progress output is a version-dependent contract — macOS 26's createinstallmedia prints percentages for the erase and nothing for the 15-minute copy, where older versions printed "Copying to disk: x%"; when the numbers aren't in the output, measure the effect (bytes landing on the volume) instead of parsing harder]
 
 [promote-spine: `volumeIsInternal == false` is true of mounted SMB/AFP shares as well as USB sticks — a "find the external volume" filter needs volumeIsLocal too, or diagnostics silently describe the wrong device]
 
