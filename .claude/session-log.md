@@ -1,5 +1,117 @@
 # BootIt — session log
 
+## 2026-08-02 — the macOS path actually works: privileged helper + the TCC grant
+
+**Commits:** `deb1a76` "Run createinstallmedia from a privileged helper, and make the
+macOS path work", `5c456c6` "Say Skipped when no download happened".
+
+**Local:** 81 tests, 0 failures; SwiftLint strict 0 violations, 33 files. Signed release
+build installed to `/Applications/BootIt.app`.
+
+### The headline
+
+**Creating a macOS installer had never once succeeded.** Not in any session. Every run
+died at the same point — `createinstallmedia` writing its `.IAPhysicalMedia` cookie to
+the root of the target volume, `EPERM`, "The bless of the installer disk failed" — after
+fifteen minutes of copying onto a drive that had already been erased. The v3.1.0 release
+shipped with a macOS path that could not work.
+
+It works now, verified end to end: blessed system folder, `boot.efi` present, and the
+`.IAPhysicalMedia` cookie that failed three times sitting on the drive.
+
+### Root cause — and two wrong diagnoses before it
+
+The cause is **TCC**, not privilege. Writes to a removable volume are gated, and the
+process doing the write held no grant. The decisive measurement, which should have been
+taken first: the identical write **succeeds from Terminal as an ordinary user** (Terminal
+has Full Disk Access) and **fails as root** from BootIt.
+
+- **Wrong diagnosis 1 — responsible-process attribution.** The theory was that TCC blamed
+  the GUI app for its `osascript` child, and a system daemon would sidestep it. Built the
+  daemon; the failure was byte-for-byte identical. A daemon is subject to TCC too.
+- **Wrong diagnosis 2 — the diagnostic itself.** The "which side is blocked" probe filtered
+  volumes on `volumeIsInternal == false`, which is also true of a mounted SMB share, so it
+  was probing the NAS at `/Volumes/Media` instead of the USB stick.
+
+The actual fix is a **one-time Full Disk Access grant**, which no code can award itself.
+The rebuild is what made that grant *possible to hold* — an ad-hoc-signed app run from a
+build directory has no stable identity for TCC to attach one to.
+
+### The privileged helper
+
+- LaunchDaemon registered with `SMAppService`, XPC to the app. App and daemon each pin the
+  other's code signature (`anchor apple generic` + identifier + team OU) via
+  `NSXPCConnection.setCodeSigningRequirement` — the supported macOS 13 API, no private
+  `auditToken` access, no PID-reuse race.
+- On-demand only: no `RunAtLoad`, no `KeepAlive`, and it **exits 30 s after the app stops
+  talking to it**. That exit path was added after a v1 daemon stayed resident across three
+  installs and kept serving requests from an old binary.
+- Refuses anything that is not a whole external disk, re-checked against `diskutil` rather
+  than trusted from the caller.
+- Removable from inside the app: **Help → Privileged Helper…**, which also has
+  **Test USB Access** — runs the exact failing syscall from both the app and the daemon and
+  reports which one is refused.
+- **Probes before erasing.** A missing grant now costs a message, not the drive's contents.
+
+### Bugs a real run exposed
+
+- **Progress froze at 50% for an entire 20-minute write.** The daemon held its callback
+  proxy in a `weak var`; `remoteObjectProxy` is autoreleased, so it was nil before the first
+  callback and every log line and progress update went nowhere. No error anywhere.
+- **The percent parser read the first match on a line.** `createinstallmedia` rewrites one
+  line in place — `Erasing disk: 0%... 10%... 20%` — so it reported 0 forever. The old code
+  had `lastPercent` for exactly this; the rewrite deleted it.
+- **Reusing a local installer parked the bar at 50%** before any work started.
+- **A skipped download was ticked green**, so a ring at 2% looked like it had reset. Now a
+  distinct `.skipped` state, which also survives `state(of:)`'s short-circuit to `.done`.
+- **"Quit" was the completion step's primary button**, bound to `.defaultAction`, while the
+  drive it had just written was still mounted — Return was one keystroke from an unejected
+  pull. Eject is primary now, becoming Done once safe.
+- **Closing the window stranded a running, windowless app** (New Window is removed). This
+  was carried as "deferred" from the previous session and was the reason Quit existed.
+- `/Volumes/Shared Support` was only unmounted on success — never on the path that
+  abandoned it. Now in a `defer`.
+
+### Decisions
+
+- **Daemon + manual FDA, not an app-spawned root child.** macOS *can* auto-prompt an app for
+  removable-volume access, which might mean zero manual steps — but it costs a password
+  prompt every run, attributed to "osascript". Rejected: the one-time grant is what disk
+  utilities do, and Mick had objected to the osascript attribution twice.
+- **Progress split stays 50/50** between download and write, and the write takes the full
+  ring when the installer is already on disk. Confirmed as wanted. Known imprecision: the
+  split is fixed, not weighted by measured throughput.
+- **Skipped `/tri-model`** — the decision failed the "genuinely open" test. Apple documents
+  `SMAppService` and Mist solves the identical problem the same way.
+
+### What to watch for next time
+
+The pattern across both wrong diagnoses: **reasoning ahead of the measurement**. Both the
+app and the daemon fail with an identical `EPERM` while being governed by entirely separate
+TCC rules, so the symptom carries no information about the cause. The `Test USB Access`
+button exists so that is never guessed at again.
+
+### Next session should start with
+
+1. **Confirm the progress ring live** — the callback fix is proven (2% → 5% and daemon log
+   lines now reach the UI), but no completed run has yet exercised the copy phase climbing
+   15% → 100%.
+2. **Version bump + tag.** GitHub still has v3.1.0, whose macOS path cannot work. This
+   release matters more than the UI redesign did.
+3. **First-run FDA guidance.** The grant is documented and detected, but a new user still
+   meets it as a failure rather than as onboarding.
+4. Add the 6 repo secrets so tagging publishes without a local build.
+
+[promote-spine: when a privileged operation fails with EPERM as root but succeeds as an ordinary user, it is TCC, not permissions — and root daemons are NOT exempt; they simply can never be prompted, so the grant has to be made by hand]
+
+[promote-spine: an autoreleased XPC remoteObjectProxy stored in a `weak var` is nil before the first callback — the channel goes silent with no error at all, which reads as "the work is stuck" rather than "the callbacks are gone"]
+
+[promote-profile:swift: a launchd daemon with no idle-exit stays resident across app updates and keeps answering from the old binary — an on-demand SMAppService helper should exit when idle or a stale build will serve requests indefinitely]
+
+[promote-spine: `volumeIsInternal == false` is true of mounted SMB/AFP shares as well as USB sticks — a "find the external volume" filter needs volumeIsLocal too, or diagnostics silently describe the wrong device]
+
+[promote-spine: never bind a destructive-adjacent "Quit"/"Done" to .defaultAction on a completion screen while removable media is still mounted — Return becomes one keystroke from an unejected pull]
+
 ## 2026-07-31 → 2026-08-01 — v3.1.0 release, UI redesign, macOS-path fixes
 
 **Commit:** `4085ff0` — "Reuse an installer already on disk, and close the assistant that opens itself"
