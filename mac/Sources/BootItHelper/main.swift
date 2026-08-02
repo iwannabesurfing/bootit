@@ -1,5 +1,6 @@
 import BootItShared
 import Foundation
+import Security
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BootItHelper — the privileged half of BootIt.
@@ -84,9 +85,47 @@ private final class CancelBox {
     var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
 }
 
+/// Daemon-wide record of destructive work in flight.
+///
+/// `HelperService` is created per connection, so nothing in an instance can
+/// stop two connections erasing the same disk at once. This is process-wide on
+/// purpose. It also gates the idle-exit: killing the daemon while a child
+/// `createinstallmedia` is running does not kill the child — it is reparented
+/// to launchd and keeps writing, and the next app launch would start a second
+/// write against the same drive.
+enum ActiveWork {
+
+    private static let lock = NSLock()
+    private static var busyDisks = Set<String>()
+
+    /// Claim `disk`, or return false if something is already working on it.
+    static func claim(_ disk: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !busyDisks.contains(disk) else { return false }
+        busyDisks.insert(disk)
+        return true
+    }
+
+    static func release(_ disk: String) {
+        lock.lock()
+        busyDisks.remove(disk)
+        lock.unlock()
+    }
+
+    static var isIdle: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return busyDisks.isEmpty
+    }
+}
+
 private final class HelperService: NSObject, HelperProtocol {
 
     private static let diskutil = "/usr/sbin/diskutil"
+    /// Serial: the daemon does one destructive thing at a time, and the XPC
+    /// invocation thread is never the one blocked doing it.
+    fileprivate static let workQueue = DispatchQueue(label: "au.media.bootit.helper.work")
     private let runner = ToolRunner()
 
     /// The connection this service is answering, so progress can be sent back
@@ -120,6 +159,12 @@ private final class HelperService: NSObject, HelperProtocol {
     }
 
     func probeWrite(volumePath: String, reply: @escaping (String?) -> Void) {
+        // Scoped so this cannot be used as an as-root "can I write here?" oracle
+        // against arbitrary directories. It exists to test USB drives.
+        guard DiskGuard.isVolumeRootPath(volumePath) else {
+            reply("Refusing to probe a path outside /Volumes.")
+            return
+        }
         reply(Self.writeDenialReason(at: volumePath))
     }
 
@@ -130,10 +175,32 @@ private final class HelperService: NSObject, HelperProtocol {
             reply("Refusing to erase \"\(disk)\" — not a whole-disk BSD name.")
             return
         }
+        // `volumeName` becomes an argument to diskutil and, later, the path
+        // "/Volumes/<name>" that a root process is pointed at. It needs the same
+        // scrutiny `disk` gets; it previously had none.
+        guard DiskGuard.isSafeVolumeName(volumeName) else {
+            reply("Refusing to use \"\(volumeName)\" as a volume name.")
+            return
+        }
         guard Self.isExternalDisk(disk) else {
             reply("Refusing to erase \(disk) — it is not an external disk.")
             return
         }
+        // Never let two callers erase the same drive at once.
+        guard ActiveWork.claim(disk) else {
+            reply("Another operation is already running on \(disk).")
+            return
+        }
+        // Off the XPC invocation thread: doing the work inline blocks this
+        // connection, so cancelCurrentOperation sent on it could not be
+        // serviced — which is half of why Cancel did nothing.
+        Self.workQueue.async {
+            defer { ActiveWork.release(disk) }
+            self.performErase(disk, volumeName: volumeName, reply: reply)
+        }
+    }
+
+    private func performErase(_ disk: String, volumeName: String, reply: @escaping (String?) -> Void) {
 
         // Prove we can write to this drive BEFORE destroying what is on it.
         //
@@ -186,10 +253,52 @@ private final class HelperService: NSObject, HelperProtocol {
     func createInstallMedia(installerAppPath: String,
                             volumeName: String,
                             reply: @escaping (String?) -> Void) {
+        guard let disk = Self.wholeDisk(hosting: "/Volumes/\(volumeName)"),
+              DiskGuard.isSafeVolumeName(volumeName) else {
+            reply("Refusing to write to a volume named \"\(volumeName)\".")
+            return
+        }
+        guard ActiveWork.claim(disk) else {
+            reply("Another operation is already running on \(disk).")
+            return
+        }
+        Self.workQueue.async {
+            defer { ActiveWork.release(disk) }
+            self.performCreateInstallMedia(installerAppPath: installerAppPath,
+                                           volumeName: volumeName,
+                                           disk: disk,
+                                           reply: reply)
+        }
+    }
 
-        let tool = installerAppPath + "/Contents/Resources/createinstallmedia"
+    private func performCreateInstallMedia(installerAppPath: String,
+                                           volumeName: String,
+                                           disk: String,
+                                           reply: @escaping (String?) -> Void) {
+
+        guard DiskGuard.isSafeVolumeName(volumeName) else {
+            reply("Refusing to write to a volume named \"\(volumeName)\".")
+            return
+        }
+        // `/Applications` only, resolved first, so a symlink or `..` cannot aim
+        // this somewhere the user does not control — /tmp, say.
+        let appPath = (installerAppPath as NSString).standardizingPath
+        guard appPath.hasPrefix("/Applications/"), !appPath.contains("..") else {
+            reply("Refusing to run an installer from outside /Applications.")
+            return
+        }
+        let tool = appPath + "/Contents/Resources/createinstallmedia"
         guard FileManager.default.isExecutableFile(atPath: tool) else {
             reply("This installer is missing its createinstallmedia tool — it may be incomplete.")
+            return
+        }
+        // The single most dangerous line in this daemon is the one that execs
+        // this path as root. "The client is signature-pinned" is not enough on
+        // its own: that gate is exactly what this check is meant to backstop,
+        // and the helper holds Full Disk Access, so a forged binary here would
+        // run as root with standing access to every user's files.
+        guard Self.isSignedByApple(tool) else {
+            reply("That createinstallmedia is not signed by Apple — refusing to run it.")
             return
         }
         let volume = "/Volumes/\(volumeName)"
@@ -207,7 +316,6 @@ private final class HelperService: NSObject, HelperProtocol {
 
         // createinstallmedia renames the volume mid-run, so follow the device
         // rather than the path, and estimate the payload before it starts.
-        let disk = Self.wholeDisk(hosting: volume)
         let expected = Self.expectedPayloadBytes(installerAppPath: installerAppPath)
         let stopPolling = Self.startCopyPolling(disk: disk, expected: expected) { [weak self] fraction, status in
             self?.reportMeasured(fraction, status)
@@ -267,6 +375,26 @@ private final class HelperService: NSObject, HelperProtocol {
         progress(fraction, status)
     }
 
+    // MARK: - Code signing
+
+    /// True when `path` is signed by Apple itself.
+    ///
+    /// `anchor apple` — not `anchor apple generic` — accepts only Apple's own
+    /// software, rather than anything Apple issued a Developer ID to.
+    static func isSignedByApple(_ path: String) -> Bool {
+        var staticCode: SecStaticCode?
+        let url = URL(fileURLWithPath: path) as CFURL
+        guard SecStaticCodeCreateWithPath(url, [], &staticCode) == errSecSuccess,
+              let staticCode else { return false }
+
+        var requirement: SecRequirement?
+        guard SecRequirementCreateWithString("anchor apple" as CFString, [], &requirement)
+                == errSecSuccess,
+              let requirement else { return false }
+
+        return SecStaticCodeCheckValidity(staticCode, [], requirement) == errSecSuccess
+    }
+
     // MARK: - Measured copy progress
     //
     // The copy phase prints no percentages, so the only honest signal is how
@@ -316,14 +444,20 @@ private final class HelperService: NSObject, HelperProtocol {
     /// Rough size of what createinstallmedia will copy.
     ///
     /// SharedSupport.dmg is nearly all of it; the multiplier covers the app
-    /// itself and the RecoveryOS. Deliberately an estimate — the bar is capped
-    /// short of the end and only the completion line finishes it, so being wrong
-    /// by a gigabyte changes the pace slightly and nothing else.
+    /// itself and the RecoveryOS. Measured on macOS Tahoe 26.6: an 18.37 GB dmg
+    /// produced 20.1 GB on the drive, a ratio of 1.09.
+    ///
+    /// Deliberately erring low. Overestimating strands the bar short of the end
+    /// and makes the finish a visible jump; underestimating just parks it on the
+    /// 93% cap for the last few seconds, which reads as "nearly done" rather
+    /// than as a fault.
+    static let payloadOverhead = 1.1
+
     static func expectedPayloadBytes(installerAppPath: String) -> Int64 {
         let dmg = installerAppPath + "/Contents/SharedSupport/SharedSupport.dmg"
         let attributes = try? FileManager.default.attributesOfItem(atPath: dmg)
         guard let size = attributes?[.size] as? Int64, size > 0 else { return 16_000_000_000 }
-        return Int64(Double(size) * 1.2)
+        return Int64(Double(size) * payloadOverhead)
     }
 
     // MARK: - Removable-volume access
@@ -441,7 +575,11 @@ private final class IdleExit {
             self.lock.unlock()
             // Anything reconnecting in the meantime bumps `generation`, so a
             // long createinstallmedia followed by more work is never cut off.
-            if unchanged { exit(0) }
+            // Exiting here would NOT kill a running createinstallmedia — the
+            // child is reparented to launchd and keeps writing to the drive,
+            // and the next app launch starts a second write against the same
+            // disk. Idle means "no connections AND nothing in flight".
+            if unchanged && ActiveWork.isIdle { exit(0) }
         }
     }
 }

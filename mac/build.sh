@@ -150,9 +150,16 @@ if [[ -n "$SIGN_ID" ]]; then
         echo "    The app and its helper would refuse to talk to each other."
         exit 1
     fi
-    codesign --verify -R="$(printf 'anchor apple generic and identifier "%s" and certificate leaf[subject.OU] = "%s"' \
-        "$HELPER_ID" "$EXPECTED_TEAM")" "$HELPER_BIN" \
+    # Must match HelperInfo.helperRequirement exactly, marker OIDs included — a
+    # build-time check weaker than the runtime one passes builds that then
+    # refuse to talk to themselves.
+    MARKERS='and certificate 1[field.1.2.840.113635.100.6.2.6] and certificate leaf[field.1.2.840.113635.100.6.1.13]'
+    codesign --verify -R="$(printf 'anchor apple generic and identifier "%s" %s and certificate leaf[subject.OU] = "%s"' \
+        "$HELPER_ID" "$MARKERS" "$EXPECTED_TEAM")" "$HELPER_BIN" \
         && echo "   Helper satisfies the requirement the app enforces."
+    codesign --verify -R="$(printf 'anchor apple generic and identifier "%s" %s and certificate leaf[subject.OU] = "%s"' \
+        "$BUNDLE_ID" "$MARKERS" "$EXPECTED_TEAM")" "$APP_DIR" \
+        && echo "   App satisfies the requirement the helper enforces."
 
     echo "   Signature verified. (spctl will still reject it until it's notarised —"
     echo "    run ./package.sh with BOOTIT_NOTARY_PROFILE set.)"

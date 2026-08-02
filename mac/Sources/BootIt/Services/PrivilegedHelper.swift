@@ -73,6 +73,10 @@ final class PrivilegedHelper {
     private let callbacks = HelperCallbacks()
     private var connection: NSXPCConnection?
     private let lock = NSLock()
+    /// Signalled when a call in flight must give up — the helper died, or the
+    /// connection was torn down under it.
+    private var inFlight: (() -> Void)?
+    private var inFlightFailure: Error?
 
     private init() {}
 
@@ -100,8 +104,10 @@ final class PrivilegedHelper {
         }
 
         // A daemon left behind by an older BootIt would happily answer, then
-        // behave like the version that installed it. Replace it instead.
-        if let installed = try? currentHelperVersion(), installed != HelperInfo.version {
+        // behave like the version that installed it. Replace it instead — but
+        // never mid-write; re-registering invalidates the connection the write
+        // is using.
+        if !isBusy, let installed = try? currentHelperVersion(), installed != HelperInfo.version {
             try reregister()
         }
     }
@@ -134,6 +140,10 @@ final class PrivilegedHelper {
     /// a root LaunchDaemon behind — installing one is only defensible if getting
     /// rid of it is equally easy.
     func uninstall() throws {
+        guard !isBusy else {
+            throw HelperError.operationFailed(
+                "BootIt is writing a drive right now. Wait for it to finish before removing the helper.")
+        }
         disconnect()
         do {
             try service.unregister()
@@ -163,8 +173,16 @@ final class PrivilegedHelper {
                 throw HelperError.notConnected("the helper failed its signature check")
             }
 
-            conn.invalidationHandler = { [weak self] in self?.clearConnection() }
-            conn.interruptionHandler = { [weak self] in self?.clearConnection() }
+            // Both must fail an outstanding call, not just interruption.
+            // `invalidate()` is what "Remove Helper" triggers, and it fires
+            // invalidationHandler only — so a write in progress used to hang on
+            // its semaphore forever with no error and no recovery.
+            conn.invalidationHandler = { [weak self] in
+                self?.failInFlight(HelperError.notConnected("the helper was disconnected"))
+            }
+            conn.interruptionHandler = { [weak self] in
+                self?.failInFlight(HelperError.notConnected("the helper stopped unexpectedly"))
+            }
             conn.resume()
             connection = conn
         }
@@ -184,6 +202,25 @@ final class PrivilegedHelper {
         lock.lock()
         connection = nil
         lock.unlock()
+    }
+
+    /// Abandon whatever call is waiting, and drop the connection.
+    private func failInFlight(_ error: Error) {
+        lock.lock()
+        let signal = inFlight
+        inFlight = nil
+        inFlightFailure = error
+        connection = nil
+        lock.unlock()
+        signal?()
+    }
+
+    /// True while a privileged operation is outstanding. Tearing the connection
+    /// down under one is the caller's mistake, not something to do silently.
+    var isBusy: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return inFlight != nil
     }
 
     private func disconnect() {
@@ -263,22 +300,27 @@ final class PrivilegedHelper {
     private func call(_ body: (HelperProtocol, @escaping (String?) -> Void) -> Void) throws {
         let helper = try proxy()
         var failure: String?
-        var connectionError: Error?
         let done = DispatchSemaphore(value: 0)
 
         lock.lock()
-        connection?.interruptionHandler = { [weak self] in
-            connectionError = HelperError.notConnected("the helper stopped unexpectedly")
-            self?.clearConnection()
-            done.signal()
-        }
+        inFlightFailure = nil
+        inFlight = { done.signal() }
         lock.unlock()
 
         body(helper) { message in
             failure = message
             done.signal()
         }
+        // Untimed on purpose: createinstallmedia legitimately runs 10-20
+        // minutes. A dead connection is caught by the handlers above, which is
+        // the correct trigger — a clock would only ever be wrong.
         done.wait()
+
+        lock.lock()
+        inFlight = nil
+        let connectionError = inFlightFailure
+        inFlightFailure = nil
+        lock.unlock()
 
         if let connectionError { throw connectionError }
         guard let failure else { return }

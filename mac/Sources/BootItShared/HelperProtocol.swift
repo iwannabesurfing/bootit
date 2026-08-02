@@ -30,9 +30,22 @@ public enum HelperInfo {
     /// real Apple-issued certificate chain, the leaf OU pins it to this team,
     /// and the identifier pins it to this app — an attacker would need our
     /// signing key, not merely a copy of the binary.
+    /// The two marker OIDs that `codesign` puts in its own designated
+    /// requirement for a Developer ID build.
+    ///
+    /// Without them the requirement accepts *any* certificate ever issued to
+    /// this team — including an "Apple Development" cert sitting in a day-to-day
+    /// Xcode keychain, which is protected far less carefully than the
+    /// notarisation key. Narrowing to Developer ID Application costs nothing.
+    private static let developerIDMarkers = """
+        and certificate 1[field.1.2.840.113635.100.6.2.6] \
+        and certificate leaf[field.1.2.840.113635.100.6.1.13]
+        """
+
     public static let clientRequirement = """
         anchor apple generic \
         and identifier "\(appBundleID)" \
+        \(developerIDMarkers) \
         and certificate leaf[subject.OU] = "\(teamIdentifier)"
         """
 
@@ -41,6 +54,7 @@ public enum HelperInfo {
     public static let helperRequirement = """
         anchor apple generic \
         and identifier "\(helperBundleID)" \
+        \(developerIDMarkers) \
         and certificate leaf[subject.OU] = "\(teamIdentifier)"
         """
 

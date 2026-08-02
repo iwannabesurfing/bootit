@@ -245,3 +245,104 @@ final class MeasuredCopyProgressTests: XCTestCase {
         XCTAssertTrue(status.contains("10.0 GB"), status)
     }
 }
+
+/// Sanity on the payload estimate, against numbers measured from a real
+/// macOS Tahoe 26.6 run: an 18.37 GB SharedSupport.dmg produced 20.1 GB on the
+/// drive. Wrong in the safe direction is fine; wrong in the other direction
+/// leaves a visible jump at the finish.
+final class PayloadEstimateTests: XCTestCase {
+
+    private let measuredDMG: Int64 = 18_370_000_000
+    private let measuredOnDisk: Int64 = 20_100_000_000
+
+    func testEstimateLandsCloseToTheMeasuredPayload() {
+        let estimate = Int64(Double(measuredDMG) * 1.1)
+        let error = abs(Double(estimate - measuredOnDisk)) / Double(measuredOnDisk)
+        XCTAssertLessThan(error, 0.05, "estimate should be within 5% of what actually lands")
+    }
+
+    func testTheFinishIsNotAVisibleJump() {
+        // An estimate that is too high strands the ring well short of the cap
+        // and the completion line then leaps it to 100%.
+        let estimate = Int64(Double(measuredDMG) * 1.1)
+        let atFinish = InstallMediaProgress.copyFraction(used: measuredOnDisk, expected: estimate)
+        XCTAssertGreaterThan(atFinish, 0.90, "should be near the cap when the copy really ends")
+        XCTAssertLessThanOrEqual(atFinish, InstallMediaProgress.copyCeiling)
+    }
+
+    func testTheOldMultiplierWouldHaveStrandedIt() {
+        // Documents why 1.2 was wrong: it left a 14-point jump at the end.
+        let old = Int64(Double(measuredDMG) * 1.2)
+        let atFinish = InstallMediaProgress.copyFraction(used: measuredOnDisk, expected: old)
+        XCTAssertLessThan(atFinish, 0.88)
+    }
+}
+
+/// The daemon validated `disk` exhaustively and `volumeName` not at all, while
+/// `volumeName` was interpolated into "/Volumes/<name>" and handed to a root
+/// createinstallmedia. `".."` resolved that to "/".
+final class VolumeNameGuardTests: XCTestCase {
+
+    func testAcceptsRealVolumeNames() {
+        for name in ["MACINSTALL", "WININSTALL", "Install macOS Tahoe", "My_Drive-1", "A"] {
+            XCTAssertTrue(DiskGuard.isSafeVolumeName(name), "should accept \(name)")
+        }
+    }
+
+    func testRejectsTraversalAndSeparators() {
+        for name in ["..", ".", "../..", "a/../..", "/", "Volumes/x", "a/b", ""] {
+            XCTAssertFalse(DiskGuard.isSafeVolumeName(name),
+                           "should reject \(String(reflecting: name))")
+        }
+    }
+
+    func testRejectsShellAndOptionLookalikes() {
+        for name in ["-rf", "--volume", "a;rm -rf /", "a$(x)", "a`x`", "a|b", "a\nb", "a\u{0}b"] {
+            XCTAssertFalse(DiskGuard.isSafeVolumeName(name),
+                           "should reject \(String(reflecting: name))")
+        }
+    }
+
+    func testRejectsLeadingDotAndStrayWhitespace() {
+        for name in [".hidden", " leading", "trailing ", " "] {
+            XCTAssertFalse(DiskGuard.isSafeVolumeName(name),
+                           "should reject \(String(reflecting: name))")
+        }
+    }
+
+    func testRejectsOverlongName() {
+        XCTAssertFalse(DiskGuard.isSafeVolumeName(String(repeating: "A", count: 64)))
+    }
+}
+
+/// `probeWrite` creates and deletes a file as root, so it must only ever be
+/// aimed at a volume root — not used as an as-root "can I write here?" oracle.
+final class VolumeRootPathTests: XCTestCase {
+
+    func testAcceptsAVolumeRoot() {
+        XCTAssertTrue(DiskGuard.isVolumeRootPath("/Volumes/MACINSTALL"))
+        XCTAssertTrue(DiskGuard.isVolumeRootPath("/Volumes/Install macOS Tahoe"))
+    }
+
+    func testRejectsEscapesAndNesting() {
+        for path in ["/Volumes", "/Volumes/", "/", "/etc", "/Users/mick",
+                     "/Volumes/../etc", "/Volumes/x/y", "/Volumes/x/../../etc"] {
+            XCTAssertFalse(DiskGuard.isVolumeRootPath(path),
+                           "should reject \(path)")
+        }
+    }
+}
+
+/// Both requirement strings must restrict the leaf to a Developer ID
+/// Application certificate, not merely to the team.
+final class SigningRequirementTests: XCTestCase {
+
+    func testRequirementsPinDeveloperIDMarkerOIDs() {
+        // Without these, any cert issued to the team satisfies the requirement —
+        // including a day-to-day "Apple Development" cert in a dev keychain.
+        for requirement in [HelperInfo.clientRequirement, HelperInfo.helperRequirement] {
+            XCTAssertTrue(requirement.contains("1.2.840.113635.100.6.2.6"), requirement)
+            XCTAssertTrue(requirement.contains("1.2.840.113635.100.6.1.13"), requirement)
+        }
+    }
+}

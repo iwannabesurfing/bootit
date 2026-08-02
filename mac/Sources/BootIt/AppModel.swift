@@ -318,7 +318,15 @@ final class AppModel: ObservableObject {
         worker.async { [weak self] in self?.runPipeline(request) }
     }
 
-    func cancel() { cancelFlag.cancel(); log("Cancelling…") }
+    func cancel() {
+        cancelFlag.cancel()
+        log("Cancelling…")
+        // The flag alone only stops the pipeline between phases. Nearly all the
+        // wall-clock time is inside a single privileged call, so without this
+        // the button did nothing at all for up to twenty minutes — the whole
+        // cancellation path existed and was never connected to it.
+        worker.async { PrivilegedHelper.shared.cancel() }
+    }
 
     /// Reset to the start for "Make Another".
     func reset() {
