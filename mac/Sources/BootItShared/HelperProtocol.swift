@@ -15,7 +15,7 @@ public enum HelperInfo {
     /// Bumped whenever the helper's behaviour changes. The app compares this
     /// against the installed daemon and re-registers on a mismatch, so an app
     /// update can never end up talking to a helper from an older version.
-    public static let version = "5"
+    public static let version = "6"
 
     /// The app's Developer ID team. Both sides pin the other to this.
     public static let teamIdentifier = "MD4M4DL5PP"
@@ -23,13 +23,6 @@ public enum HelperInfo {
     public static let appBundleID    = "au.media.bootit"
     public static let helperBundleID = "au.media.bootit.helper"
 
-    /// Code-signing requirement the helper demands of anything connecting to it.
-    ///
-    /// Without this, any process on the machine could open the Mach service and
-    /// ask a root daemon to erase a disk. `anchor apple generic` pins it to a
-    /// real Apple-issued certificate chain, the leaf OU pins it to this team,
-    /// and the identifier pins it to this app — an attacker would need our
-    /// signing key, not merely a copy of the binary.
     /// The two marker OIDs that `codesign` puts in its own designated
     /// requirement for a Developer ID build.
     ///
@@ -42,6 +35,13 @@ public enum HelperInfo {
         and certificate leaf[field.1.2.840.113635.100.6.1.13]
         """
 
+    /// Code-signing requirement the helper demands of anything connecting to it.
+    ///
+    /// Without this, any process on the machine could open the Mach service and
+    /// ask a root daemon to erase a disk. `anchor apple generic` pins it to a
+    /// real Apple-issued certificate chain, the marker OIDs to a Developer ID
+    /// build, the leaf OU to this team, and the identifier to this app — an
+    /// attacker would need our signing key, not merely a copy of the binary.
     public static let clientRequirement = """
         anchor apple generic \
         and identifier "\(appBundleID)" \
@@ -78,6 +78,16 @@ public enum HelperInfo {
 
     /// Used to detect a stale daemon left behind by an earlier app version.
     func helperVersion(reply: @escaping (String) -> Void)
+
+    /// Hash of the binary this daemon is actually *running*, captured at launch.
+    ///
+    /// The version constant only catches a stale daemon if someone remembers to
+    /// bump it, and twice now nobody did — leaving a running daemon serving old
+    /// code while the app, seeing matching versions, happily kept talking to it.
+    /// A fingerprint taken at process start cannot be forgotten: replacing the
+    /// app bundle changes the file on disk while the running daemon keeps
+    /// reporting what it launched with, so the mismatch is self-evident.
+    func helperFingerprint(reply: @escaping (String) -> Void)
 
     /// Erase `disk` (a BSD name such as "disk4") to JHFS+/GPT named `volumeName`.
     ///

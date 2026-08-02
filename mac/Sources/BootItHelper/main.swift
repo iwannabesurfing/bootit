@@ -153,6 +153,18 @@ private final class HelperService: NSObject, HelperProtocol {
         reply(HelperInfo.version)
     }
 
+    func helperFingerprint(reply: @escaping (String) -> Void) {
+        reply(Self.launchFingerprint)
+    }
+
+    /// Captured once, at process launch, BEFORE the app bundle can be replaced
+    /// underneath us. Reading it lazily later would hash whatever new binary had
+    /// been installed since and report a match that isn't one.
+    static let launchFingerprint: String = {
+        guard let path = Bundle.main.executablePath else { return "" }
+        return BinaryFingerprint.of(path: path)
+    }()
+
     func cancelCurrentOperation(reply: @escaping (Bool) -> Void) {
         runner.cancel()
         reply(true)

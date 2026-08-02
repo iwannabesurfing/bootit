@@ -1,4 +1,14 @@
+import CryptoKit
 import Foundation
+
+/// SHA-256 of a file, hex-encoded. Used to tell a running daemon apart from the
+/// binary currently sitting in the app bundle.
+public enum BinaryFingerprint {
+    public static func of(path: String) -> String {
+        guard let data = FileManager.default.contents(atPath: path) else { return "" }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
 
 /// The last thing standing between a malformed disk identifier and a root
 /// process running `diskutil eraseDisk` on it.

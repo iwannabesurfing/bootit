@@ -107,7 +107,7 @@ final class PrivilegedHelper {
         // behave like the version that installed it. Replace it instead — but
         // never mid-write; re-registering invalidates the connection the write
         // is using.
-        if !isBusy, let installed = try? currentHelperVersion(), installed != HelperInfo.version {
+        if !isBusy, isStale() {
             try reregister()
         }
     }
@@ -234,6 +234,38 @@ final class PrivilegedHelper {
     //
     // All of these block the calling thread and must run off the main queue —
     // the same contract `Shell.run` already had, so callers don't change shape.
+
+    /// Whether the running daemon is a different build from the one in this
+    /// bundle. Compares the binary the daemon launched with, not a constant
+    /// somebody has to remember to change.
+    private func isStale() -> Bool {
+        guard let bundled = Bundle.main.executableURL?
+            .deletingLastPathComponent()
+            .appendingPathComponent("BootItHelper").path else { return false }
+        let expected = BinaryFingerprint.of(path: bundled)
+        guard !expected.isEmpty else { return false }
+
+        guard let running = try? currentHelperFingerprint() else {
+            // An older daemon predating this method cannot answer it at all,
+            // which is itself proof that it is stale.
+            return true
+        }
+        return running != expected
+    }
+
+    private func currentHelperFingerprint() throws -> String {
+        let helper = try proxy()
+        var result = ""
+        let done = DispatchSemaphore(value: 0)
+        helper.helperFingerprint { value in
+            result = value
+            done.signal()
+        }
+        guard done.wait(timeout: .now() + 10) == .success else {
+            throw HelperError.notConnected("the helper did not respond")
+        }
+        return result
+    }
 
     private func currentHelperVersion() throws -> String {
         let helper = try proxy()
