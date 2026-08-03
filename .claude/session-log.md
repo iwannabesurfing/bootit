@@ -1,5 +1,188 @@
 # BootIt — session log
 
+## 2026-08-03 (session 2) — v3.2.0 shipped, and the progress bar lied for 33 minutes
+
+**Commits:** `26f20f7` → `8231f8b` (5 this session), all pushed. Tag **`v3.2.0`**, released
+2026-08-03T10:29:01Z.
+
+**CI:** green, SHA-anchored to `8231f8b` (run `30779906756`, `headSha` verified equal to
+`git rev-parse HEAD`).
+**Local:** receipt `.claude/receipts/bootit-green.build-test-lint.receipt.txt` —
+**143 tests, 0 failures**, 0 SwiftLint violations across 34 files, 0 compiler warnings.
+(110 tests at session start.)
+
+### The headline
+
+**v3.2.0 is published and notarised**, replacing a release that had been on GitHub since 31 July
+shipping a macOS path that could not work. Verified by downloading from the public
+`releases/latest/download/BootIt.dmg` URL rather than by trusting the workflow: `spctl` reports
+`source=Notarized Developer ID` for both the DMG and the app inside it, and the bundle reports 3.2.0.
+
+Then the first full `createinstallmedia` write against this build — 38 minutes, verified good —
+showed that **the progress ring measures allocation, not data**. It reached 95% in four minutes and
+did not move again for the remaining 33.
+
+### Phase 1 closed — items 1 and 3
+
+- **Item 3 — `call()`, invalidation and cancel are tested** (9 tests), driven through the real
+  `erase()` path against an injectable proxy, so `call()` is exercised as the app uses it rather
+  than through a hole opened for testing. The only seam is where the daemon comes from.
+- **Item 1 — one erase instead of two.** `DiskErase` owns the arguments and the −69850 retry; each
+  caller keeps its own runner, since the daemon streams through a cancellable `ToolRunner` and the
+  app blocks on `Shell.run` — the one thing they genuinely do differently.
+
+### The hang the test seam found
+
+Writing the tests found a bug rather than confirming their absence. `call()` obtained the XPC proxy
+**before** registering the in-flight signal. A connection dying in that window found `inFlight` still
+nil, so it had nothing to signal, and the failure it recorded was then wiped by the registration
+itself. The call went out on a dead connection whose reply can never arrive — and the wait is
+untimed, deliberately, because a real write legitimately runs 40 minutes. **The window was small;
+the consequence was unbounded.**
+
+Registering first closes it. A `defer` releases the claim on every exit including a throwing
+`proxy()`, which previously left `isBusy` stuck on and Remove Helper refusing for the life of the
+process.
+
+Three mutation checks, all bite: the old order hangs the call until the test times out; deleting the
+`defer` strands the busy flag; a `connectionFailed` that records without signalling parks the write
+forever.
+
+### Three diagnostics bugs, one shape
+
+All three were the app deciding what a failure *meant* instead of reporting what it was *told* —
+the same shape as last session's dead `catch` blocks and the `"NEEDS_FULL_DISK_ACCESS: "` prefix.
+
+- **"USB access blocked" was asserted for a test that never reached the helper.** Nothing had been
+  established in either direction. There are three outcomes now — ok, blocked, inconclusive — and an
+  unreachable helper is inconclusive whatever the app itself can do, as is having no drive inserted.
+- **`helperError` was computed and discarded.** On the run that exposed this it would have read "the
+  helper stopped unexpectedly", which points straight at the cause. Instead the screen offered Full
+  Disk Access as the fix for a problem that had nothing to do with it.
+- **`helperDenial` was computed and discarded too.** The daemon separates a TCC denial
+  (`needsFullDiskAccess`) from a read-only volume or an I/O error (`operationFailed` + strerror), and
+  both rendered as the identical "go and add Full Disk Access". It also made the day's verification
+  weaker than it looked: nothing on screen distinguished which code had crossed, so the
+  classification had to be inferred from reading the daemon rather than observed.
+
+### Verification ran the wrong binary for an hour
+
+The first "Test USB Access" reported failure. It was not a bug in the shipped code: the **running app
+had started at 10:36 and the installed bundle was written at 10:56**, so a pre-`NSError` app was
+talking to a post-`NSError` helper. The unified log named it exactly — a method-signature dump
+comparing `class 'NSString'` against `argument 1: type encoding (@) '@"NSError"'`, then
+`XPC_ERROR_CONNECTION_INTERRUPTED`.
+
+Three measurements agreed: the `ea0bbe2` commit time (10:56), the bundle mtime (10:56), and the app
+process start time (10:36:13). Rebuilt, reinstalled, relaunched — then both halves passed.
+
+**`isStale()` cannot catch this.** It detects a stale *daemon* by fingerprint, and in this case
+actively reported healthy: the running app hashes the on-disk helper and compares it to the running
+daemon, and both were new. The only stale party was the one asking. Nothing detects an app whose
+bundle was replaced underneath it.
+
+### The release, and the secrets that had vanished
+
+The six signing secrets were **gone** — `total_count: 0`, no environments, no org. They had existed
+on 31 July, proven by the published v3.1.0 DMG reporting `source=Notarized Developer ID`.
+
+This mattered more than a plain blocker: the publish step is gated on
+`if: ... && env.MACOS_CERT_P12 != ''`, so tagging would have checked out, built, signed ad-hoc,
+skipped notarisation, uploaded a 7-day artifact and **finished green with no release published**.
+
+Restored all six. `MACOS_CERT_P12` took three attempts — the first supplied file was a `.cer` (no
+private key), the second and third exports were the **Apple Distribution** identity rather than
+Developer ID Application. `openssl pkcs12 -nokeys` named the identity in under a second each time,
+which is why none of them reached a CI run. A `workflow_dispatch` dry run then proved the whole
+pipeline — build, sign, notarise, publish-nothing — before the tag was pushed.
+
+### The full write — measured
+
+38 minutes, `createinstallmedia` 20:29:47 → ~21:07. `.IAPhysicalMedia`, `boot.efi`,
+`BaseSystem/BaseSystem.dmg`, `Firmware/`, `Install macOS Tahoe.app` all present, ProductVersion 26.6,
+volume renamed `MACINSTALL` → `Install macOS Tahoe`, no orphans. `DiskErase.perform` formatted a real
+stick and `call()` held a 38-minute untimed wait — both shipped-today changes proven on hardware.
+
+**Throughput ~8.8 MB/s**, which is the SanDisk stick, not BootIt. The app shells out to Apple's own
+binary with no wrapper overhead; Terminal would take the same 38 minutes. `diskutil` calls it
+"SanDisk 3.2Gen1" — the interface rating, not the flash speed.
+
+**And the bar was wrong the whole time:**
+
+| Time | `df` used | device I/O |
+|---|---|---|
+| 20:31 | 1.13 GB | — |
+| 20:33 | 2.06 GB | — |
+| 20:34 | **18.71 GB** | +16.65 GB in 60 s — impossible at 9 MB/s |
+| 20:34 → 21:07 | **18.71 GB, frozen** | steady 535 MB/min |
+
+HFS+ allocates the file up front and the data fills in behind it, so `df` reports the allocation
+immediately. Both `used` and `avail` freeze, so neither can drive the bar. Cumulative device I/O
+counters tracked the real write accurately for the entire 33 minutes.
+
+### Decisions
+
+- **Shipped without waiting for the full write.** The comparison was not "verified vs unverified" but
+  "unverified in one well-tested pure function vs known-broken end to end". The write was run
+  afterwards and passed, which validates the call rather than excusing it.
+- **Did not fix the progress bar this session.** It needs the I/O-counter source designed properly,
+  not a patch bolted on at the end of a session; and it is now the largest remaining UX defect, so it
+  leads the queue rather than being squeezed in.
+- **Did not run the dry run before the secrets were restored.** Without them it could only exercise
+  the ad-hoc fallback — it would not have tested the notarisation path, which was the part in
+  question. Run after restoring, it proved exactly the right thing.
+
+### Issues discovered
+
+- **Nothing detects a stale app** whose bundle was replaced underneath it (see above). Cost an hour
+  and a false failure report.
+- **`currentHelperVersion()` is dead** — one occurrence, the definition. Superseded by the
+  fingerprint check; Swift does not warn on unused private methods.
+- **The log line still promises "10–20 minutes"** against a measured 38. Folds into the progress fix.
+- **`probeWrite` bypasses `decode()`**, so the `HelperFailure.needsFullDiskAccess` → 
+  `HelperError.needsFullDiskAccess` mapping is still only unit-tested. It runs for real only on a
+  write that fails, which this session's write did not.
+
+### Test results
+
+143 tests, 0 failures. 110 at session start → 143. SwiftLint strict: 0 violations, 34 files.
+0 compiler warnings. Receipt committed.
+
+Six mutation checks proved the new tests bite: the `call()` ordering (hangs to timeout), the `defer`
+(busy flag stranded), `connectionFailed` without its signal (write parked), `partitionDisk`
+scheme/filesystem swapped (3 tests), the Windows scheme flipped to GPT (2 tests), and an unreachable
+helper falling through to `.blocked` (3 tests). A seventh caught a dangling colon on an empty error
+string before it shipped.
+
+Not covered by tests, verified by hand: the full macOS write, the notarised DMG from the public URL,
+the FDA revoke/restore cycle.
+
+### Next session should start with
+
+1. **Copy progress from device I/O counters.** Measured, not theorised — see the table above. Third
+   distinct cause of "the bar doesn't move", and the first two are already fixed. Retire the
+   "10–20 minutes" line with it.
+2. **Stale-app detection + first-run Full Disk Access onboarding.** Likely one piece of work:
+   "BootIt was updated while running, quit and reopen" and "BootIt needs Full Disk Access before it
+   can write" are the same class of message, both belonging before the user commits to erasing a
+   drive. Design call — options range from a launch-time mtime watch to catching the XPC mismatch.
+3. **Delete `currentHelperVersion()`**, and decide whether `helperVersion` leaves the XPC protocol
+   with it.
+4. **Route `probeWrite` through `decode()`**, or accept that the mapping is unit-tested only and say
+   so in a comment.
+5. **Ask why the release secrets vanished.** Restored, but the cause is unknown, and it silently
+   disarmed the release pipeline for an unknown period.
+
+[promote-spine: when a fix spans a client and server that ship inside one bundle, a verification run proves nothing unless BOTH sides are pinned to the same build and that is measured — BootIt spent an hour diagnosing a failure that was a 10:36 app talking to a 10:56 helper across a changed XPC method signature, and the mismatch was only visible by comparing the app's process start time against the bundle's mtime]
+
+[promote-spine: a progress bar driven from filesystem used-bytes measures ALLOCATION, not data — BootIt's ring reached 95% in four minutes and did not move for the remaining 33 of a 38-minute write, while the device took a steady 535 MB/min the whole time; the filesystem reports the allocation up front and both used and avail then freeze, so cumulative device I/O counters are the signal a copy bar has to read]
+
+[promote-spine: a release job whose publish step is gated on `if: <secret> != ''` reports SUCCESS while publishing nothing — BootIt's six signing secrets had been deleted between releases, so a tag would have produced a green run, a 7-day artifact and no release at all; a tag build must fail loud on missing credentials rather than silently degrade to a no-op]
+
+[promote-spine: verify a credential locally before spending a CI run proving it wrong — BootIt's Developer ID .p12 arrived as a .cer with no private key, then twice as the Apple Distribution identity, and `openssl pkcs12 -nokeys` named the wrong identity in under a second each time where the pipeline would have burned a full macOS build to say the same thing less clearly]
+
+[promote-profile:swift: an app that decides what a failure MEANS instead of reporting what it was TOLD gives confident wrong guidance — BootIt asserted "USB access blocked" for a probe that never reached the helper and discarded the daemon's own NSError message in two separate branches, sending the user to change a TCC setting that was never implicated; three instances of one defect in a single session, every one found by reading the screen against the code that produced it]
+
 ## 2026-08-03 — Phase 0 ran, and Cancel was still dead
 
 **Commits:** `512575b` → `12f51b1` (6 this session), all pushed.
