@@ -63,7 +63,9 @@ extension AppModel {
         case .source:   return "Choose installer source"
         case .options:  return platform == .macos ? "Choose macOS version" : "Choose Windows options"
         case .usb:      return "Choose the USB drive to erase"
-        case .progress: return runError == nil ? "Creating \(platformName) installer" : "Something went wrong"
+        case .progress:
+            if wasCancelled { return "Build cancelled" }
+            return runError == nil ? "Creating \(platformName) installer" : "Something went wrong"
         case .done:     return "Your \(platformName) installer is ready"
         }
     }

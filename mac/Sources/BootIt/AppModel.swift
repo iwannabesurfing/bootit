@@ -87,6 +87,10 @@ final class AppModel: ObservableObject {
     @Published var statusText = "Starting…"
     @Published var logText = ""
     @Published var runError: String?
+    /// True when the run stopped because the user asked it to. Distinct from
+    /// `runError` being set: cancelling is an outcome, not a fault, and the two
+    /// must not present the same way.
+    @Published var wasCancelled = false
     @Published var running = false
     @Published var currentPhase: WritePhase?
 
@@ -172,7 +176,8 @@ final class AppModel: ObservableObject {
         else { return .pending }
         if index < currentIndex { return .done }
         guard index == currentIndex else { return .pending }
-        return runError == nil ? .active : .failed
+        if runError == nil { return .active }
+        return wasCancelled ? .cancelled : .failed
     }
 
     private func setPhase(_ phase: WritePhase) {
@@ -314,6 +319,7 @@ final class AppModel: ObservableObject {
         guard let drive = selectedDrive else { return }
         cancelFlag.reset()
         runError = nil
+        wasCancelled = false
         progress = 0
         logText = ""
         statusText = "Starting…"
@@ -357,7 +363,8 @@ final class AppModel: ObservableObject {
         source = .download
         hasAcknowledgedErase = false
         isConfirmingErase = false
-        progress = 0; logText = ""; runError = nil; running = false; statusText = "Starting…"
+        progress = 0; logText = ""; runError = nil; wasCancelled = false
+        running = false; statusText = "Starting…"
         currentPhase = nil; showsLogDetails = false; showsAdvancedWindowsOptions = false
         editions = []; languages = []; macInstallers = []
         selectedMacGroupTitle = ""; selectedMacBuild = ""; showOlderMacBuilds = false
@@ -379,15 +386,25 @@ final class AppModel: ObservableObject {
                 self.step = .done
             }
         } catch {
-            let msg = message(error)
+            // Stopping on request is not a fault. The tool's own message is
+            // discarded here on purpose: "createinstallmedia exited 15" is the
+            // SIGTERM *we* sent it, and reporting that as "Something went wrong"
+            // — with diagnostics to copy and a hint about what to try — blames
+            // the user for pressing the button we offered them.
+            let cancelled = cancelFlag.isCancelled
+            let msg = cancelled
+                ? "Stopped before the installer was finished, so the drive is not bootable. Start over to make one."
+                : message(error)
             onMain {
                 self.running = false
-                self.statusText = "Error"
+                self.wasCancelled = cancelled
+                self.statusText = cancelled ? "Cancelled" : "Error"
                 self.runError = msg
                 // A failure is exactly when the technical detail stops being
-                // noise and starts being the thing you need.
-                self.showsLogDetails = true
-                self.log("\n❌  \(msg)")
+                // noise and starts being the thing you need. A cancellation is
+                // not that moment — nothing in the log needs reading.
+                self.showsLogDetails = !cancelled
+                self.log(cancelled ? "\nCancelled." : "\n❌  \(msg)")
             }
         }
     }

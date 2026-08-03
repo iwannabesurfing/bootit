@@ -7,7 +7,16 @@ struct ProgressStepView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if let error = model.runError {
+            if let error = model.runError, model.wasCancelled {
+                // Nothing failed, so nothing here should read like it did — no
+                // red banner, no diagnostics to send, no "what to try" hint for
+                // an outcome the user chose deliberately.
+                StatusBanner(.information, title: "Build cancelled", message: error)
+                phaseChecklist
+                Button("Try Again") { model.start() }
+                    .disabled(model.selectedDrive == nil)
+                    .accessibilityIdentifier("try-again-button")
+            } else if let error = model.runError {
                 StatusBanner(.error, title: "The build stopped", message: error)
                 if let hint = model.recoveryHint {
                     StatusBanner(.information, title: "What to try", message: hint)
@@ -84,6 +93,11 @@ struct ProgressStepView: View {
         case .failed:
             Image(systemName: "xmark.circle.fill")
                 .foregroundStyle(.red)
+        case .cancelled:
+            Image(systemName: "stop.circle")
+                .foregroundStyle(Color.secondary)
+                .font(.system(size: 12))
+                .frame(width: 16)
         case .skipped:
             Image(systemName: "minus.circle")
                 .foregroundStyle(Color.secondary.opacity(0.7))
@@ -102,6 +116,7 @@ struct ProgressStepView: View {
         case .done:    return "Completed"
         case .active:  return "In progress"
         case .failed:  return "Failed"
+        case .cancelled: return "Cancelled"
         case .skipped: return "Skipped, the installer was already on this Mac"
         case .pending: return "Not started"
         }

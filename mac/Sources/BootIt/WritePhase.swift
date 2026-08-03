@@ -45,6 +45,10 @@ enum PhaseState: Equatable {
     /// The phase that was running when the build stopped. Without this the
     /// checklist shows a failed stage as still in progress.
     case failed
+    /// The phase that was running when the user cancelled. Distinct from
+    /// `.failed`: nothing went wrong, so a red cross labelled "Failed" is a
+    /// lie about what happened, and about who did it.
+    case cancelled
     /// Planned, but there turned out to be nothing to do — the installer was
     /// already on the Mac, so no download happened.
     ///

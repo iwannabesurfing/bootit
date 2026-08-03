@@ -41,4 +41,59 @@ final class CancellationTests: XCTestCase {
 
         wait(for: [reached], timeout: 2)
     }
+
+    // MARK: - How a cancellation is presented
+    //
+    // Once cancel started working, the screen behind it became reachable for the
+    // first time and was reporting the user's own choice as a crash: "Something
+    // went wrong", a red banner, and "createinstallmedia exited 15" — which is
+    // the SIGTERM BootIt itself sent — offered up as diagnostics to copy.
+
+    private func cancelledModel() -> AppModel {
+        let model = AppModel(privilegedCancel: {})
+        model.platform = .macos
+        model.step = .progress
+        model.runError = "Stopped before the installer was finished."
+        model.wasCancelled = true
+        return model
+    }
+
+    func testACancelledBuildIsNotTitledAsAFailure() {
+        XCTAssertEqual(cancelledModel().pageTitle, "Build cancelled")
+    }
+
+    func testAFailedBuildIsStillTitledAsAFailure() {
+        let model = AppModel(privilegedCancel: {})
+        model.platform = .macos
+        model.step = .progress
+        model.runError = "Splitting install.wim failed (wimlib exit 2)."
+        XCTAssertEqual(model.pageTitle, "Something went wrong")
+    }
+
+    /// The stopped phase must not read "Failed" — nothing failed.
+    func testTheStoppedPhaseReadsAsCancelledRatherThanFailed() {
+        let model = cancelledModel()
+        model.source = .local
+        model.currentPhase = .creatingInstaller
+        XCTAssertEqual(model.state(of: .creatingInstaller), .cancelled)
+    }
+
+    func testTheStoppedPhaseStillReadsAsFailedWhenSomethingActuallyFailed() {
+        let model = AppModel(privilegedCancel: {})
+        model.platform = .macos
+        model.source = .local
+        model.step = .progress
+        model.runError = "createinstallmedia could not bless the disk."
+        model.currentPhase = .creatingInstaller
+        XCTAssertEqual(model.state(of: .creatingInstaller), .failed)
+    }
+
+    /// Starting again has to clear the cancelled presentation, or the next run
+    /// begins wearing the last one's outcome.
+    func testResetClearsTheCancelledState() {
+        let model = cancelledModel()
+        model.reset()
+        XCTAssertFalse(model.wasCancelled)
+        XCTAssertNil(model.runError)
+    }
 }
