@@ -114,11 +114,21 @@ struct HelperStatusView: View {
         busy = true
         DispatchQueue.global(qos: .userInitiated).async {
             let report = AccessDiagnostics.run()
-            let healthy = report.helperCanWrite == true && report.appCanWrite != false
+            let title: String
+            switch report.outcome {
+            case .ok:
+                title = "USB access OK"
+            case .blocked:
+                title = "USB access blocked"
+            case .inconclusive:
+                // Not "blocked": nothing was established either way, and saying
+                // otherwise sends the user to fix a setting that may be fine.
+                title = "Couldn't test USB access"
+            }
             DispatchQueue.main.async {
-                statusText = healthy ? "USB access OK" : "USB access blocked"
+                statusText = title
                 detail = report.summary
-                isHealthy = healthy
+                isHealthy = report.outcome == .ok
                 busy = false
             }
         }

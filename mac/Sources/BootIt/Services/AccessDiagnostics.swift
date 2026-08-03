@@ -14,6 +14,19 @@ import Foundation
 /// first diagnosis of this bug was wrong. This separates them.
 enum AccessDiagnostics {
 
+    /// What the test actually established.
+    ///
+    /// The third case is the one that was missing. A helper that could not be
+    /// reached, or no drive to test against, says **nothing** about whether USB
+    /// access is blocked — but both used to be reported as "USB access blocked",
+    /// which names a cause the test never observed and sends the user to Full
+    /// Disk Access for a problem that may have nothing to do with it.
+    enum Outcome {
+        case ok
+        case blocked
+        case inconclusive
+    }
+
     struct Report {
         let volume: String?
         let appCanWrite: Bool?        // nil when there was no volume to test
@@ -23,6 +36,12 @@ enum AccessDiagnostics {
         var helperCanWrite: Bool? {
             guard helperError == nil else { return nil }
             return helperDenial == nil
+        }
+
+        var outcome: Outcome {
+            guard volume != nil, helperError == nil else { return .inconclusive }
+            if helperCanWrite == true, appCanWrite != false { return .ok }
+            return .blocked
         }
 
         /// What to tell the user, in the order the problems have to be solved.
@@ -43,7 +62,19 @@ enum AccessDiagnostics {
                      + "background helper for this, so add BootIt under System Settings → "
                      + "Privacy & Security → Full Disk Access, then click Install or Repair."
             default:
-                return "Couldn't reach the helper to test it."
+                // `helperError` used to be computed here and thrown away, so the
+                // one sentence saying *what went wrong* never reached the screen.
+                // It is the difference between "the helper stopped unexpectedly"
+                // — which points at the app and helper being different builds —
+                // and a user reading "blocked" and going to change a setting that
+                // was never the problem.
+                // An error that is present but empty still has to read as a
+                // sentence rather than trail off after a colon.
+                let reason = helperError.flatMap { $0.isEmpty ? nil : $0 }
+                return "Couldn't reach the helper, so this says nothing about USB access"
+                     + (reason.map { ": \($0)" } ?? ".")
+                     + "\n\nIf BootIt was updated while it was open, quit and reopen it, "
+                     + "then test again."
             }
         }
     }
