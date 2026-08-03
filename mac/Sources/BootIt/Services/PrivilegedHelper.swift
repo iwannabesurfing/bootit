@@ -167,11 +167,14 @@ final class PrivilegedHelper {
 
             // Pin the daemon, so a process squatting the Mach service can't
             // pose as it and harvest what we send.
-            do {
-                try conn.setCodeSigningRequirement(HelperInfo.helperRequirement)
-            } catch {
-                throw HelperError.notConnected("the helper failed its signature check")
-            }
+            //
+            // Non-throwing: this registers the requirement and XPC invalidates
+            // the connection later if the peer fails it, so there is no error to
+            // catch here. The do/catch that used to wrap it threw
+            // "the helper failed its signature check" from a block that could
+            // never execute — a failure surfaces through `invalidationHandler`
+            // below instead, which is where it actually arrives.
+            conn.setCodeSigningRequirement(HelperInfo.helperRequirement)
 
             // Both must fail an outstanding call, not just interruption.
             // `invalidate()` is what "Remove Helper" triggers, and it fires

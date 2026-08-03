@@ -77,14 +77,6 @@ private final class ToolRunner {
     }
 }
 
-/// A thread-safe one-way flag, for stopping the copy poller.
-private final class CancelBox {
-    private let lock = NSLock()
-    private var value = false
-    func set() { lock.lock(); value = true; lock.unlock() }
-    var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
-}
-
 /// Daemon-wide record of destructive work in flight.
 ///
 /// `HelperService` is created per connection, so nothing in an instance can
@@ -419,21 +411,32 @@ private final class HelperService: NSObject, HelperProtocol {
     // which createinstallmedia says nothing at all.
 
     /// Poll the target volume's used space until the returned closure is called.
+    ///
+    /// A timer source rather than a `while` loop around `Thread.sleep`. The loop
+    /// held one of the global pool's threads for the entire copy — up to forty
+    /// minutes on a slow stick — doing nothing for all but a few microseconds of
+    /// it, and could only notice the stop request when its current sleep expired.
+    /// The timer occupies no thread between firings and stops on the spot.
     static func startCopyPolling(disk: String?,
                                  expected: Int64,
                                  report: @escaping (Double, String) -> Void) -> () -> Void {
         guard let disk else { return {} }
-        let stopped = CancelBox()
-        DispatchQueue.global(qos: .utility).async {
-            while !stopped.isSet {
-                if let used = volumeUsedBytes(onDisk: disk), used > 0 {
-                    report(InstallMediaProgress.copyFraction(used: used, expected: expected),
-                           InstallMediaProgress.copyStatus(used: used, expected: expected))
-                }
-                Thread.sleep(forTimeInterval: 2)
-            }
+        let queue = DispatchQueue(label: "au.media.bootit.helper.copy-poll", qos: .utility)
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        // Fires immediately, as the loop did: the first sample is what replaces
+        // a bar sitting at its starting value while the copy is visibly running.
+        // Leeway because two seconds is a UI cadence, not a deadline — it lets
+        // the kernel coalesce this with other wakeups.
+        timer.schedule(deadline: .now(), repeating: .seconds(2), leeway: .milliseconds(500))
+        timer.setEventHandler {
+            guard let used = volumeUsedBytes(onDisk: disk), used > 0 else { return }
+            report(InstallMediaProgress.copyFraction(used: used, expected: expected),
+                   InstallMediaProgress.copyStatus(used: used, expected: expected))
         }
-        return { stopped.set() }
+        timer.resume()
+        // Captures `timer` strongly on purpose — it is the only thing keeping the
+        // source alive, and a deallocated timer source stops firing silently.
+        return { timer.cancel() }
     }
 
     /// Bytes in use on whichever volume is currently mounted from `disk`.
@@ -612,12 +615,13 @@ private final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
 
         // The whole security model of this daemon. Anything that cannot prove it
         // is our Developer ID-signed app never reaches a method that erases a disk.
-        do {
-            try connection.setCodeSigningRequirement(HelperInfo.clientRequirement)
-        } catch {
-            NSLog("BootItHelper: rejected a connection failing the signing requirement: \(error)")
-            return false
-        }
+        //
+        // Enforcement is XPC's, not this line's. `setCodeSigningRequirement` is
+        // non-throwing — it registers the requirement, and XPC invalidates the
+        // connection later if the peer fails it. This used to be wrapped in a
+        // do/catch returning false, which read as "reject it here" while the
+        // catch could never run; the compiler had been saying so all along.
+        connection.setCodeSigningRequirement(HelperInfo.clientRequirement)
 
         let service = HelperService()
         connection.exportedInterface = HelperInterface.make()
