@@ -183,6 +183,55 @@ the FDA revoke/restore cycle.
 
 [promote-profile:swift: an app that decides what a failure MEANS instead of reporting what it was TOLD gives confident wrong guidance — BootIt asserted "USB access blocked" for a probe that never reached the helper and discarded the daemon's own NSError message in two separate branches, sending the user to change a TCC setting that was never implicated; three instances of one defect in a single session, every one found by reading the screen against the code that produced it]
 
+### ADDENDUM — C-TRIMODEL fired on the progress indicator (post-close)
+
+**Commit:** research files + this addendum. **Trigger:** the user, not the agent.
+
+After the session-end push the user objected that the progress indicator had been fixed three times
+with no real investigation, and asked for a triangulation. **He was right, and the objection lands
+twice.** The queued task #7 — "use device I/O counters" — was a *fourth reader substitution*, and it
+was queued in the same session in which I wrote, in a promotion file, that "when the same
+user-visible symptom returns after a fix, suspect the source of truth, not the reader; two fixes to
+the reader is the signal." I named the pattern and then repeated it in the next action.
+
+I also overstated the evidence for that fix: I reported that cumulative device I/O counters "tracked
+the real write perfectly", when what I had demonstrated was that they showed **movement**. Movement
+is not progress, and I never established a baseline could produce a percentage. All three legs
+subsequently dismissed the baseline objection as trivial, so that specific worry was wrong too — but
+in the other direction, which is not exculpatory.
+
+**The gate should have fired on my own judgment.** It passes all three tests: foundational (the
+entire UI for 38 of 40 minutes of the app's primary operation), hard to reverse (every iteration
+costs a human-gated 40-minute hardware run to falsify — which is *why* three wrong answers shipped),
+and genuinely open (five materially different approaches). Queueing a patch instead of flagging is
+the mis-scoping the gate exists to prevent.
+
+**Result — `docs/research/copy-progress-reporting-*` (3 legs + synthesis, gate check passes).**
+
+All three models independently rejected the *framing*, not the implementation. Gemini named it a
+"reader substitution anti-pattern"; ChatGPT, "assuming that every long operation must be represented
+as a scalar fraction complete"; Claude, "answering *what percentage* when the user asked *is this
+working*". Nine unanimous decisions, three real divergences resolved.
+
+The core resolution went **against** my own leg and Gemini's: **no macOS percentage for now.**
+ChatGPT's evidence bar for a trustworthy denominator is not met on n = 1 — one instrumented run, one
+stick. Ship an indeterminate ring plus explicit liveness (MB/s, bytes, elapsed, a broad range),
+instrument to collect traces across a device matrix, then re-evaluate against Gemini's 5/90/5 model.
+Sequencing, not permanent rejection.
+
+Two corrections to my leg, both from converging external legs: `proc_pid_rusage` demoted from
+"cross-check" to "instrument and observe" (it measures the buffer-cache layer, so it would race then
+freeze exactly as `df` does — one layer up), and ChatGPT uniquely caught that device counters can
+reset on detach, re-enumeration or sleep, which directly threatens the baseline subtraction all three
+legs otherwise endorsed.
+
+Task #7 rewritten to the decision. Nothing implemented — the build order starts with trace logging
+and a replay harness, so the next attempt can be falsified in under a second instead of forty minutes.
+
+[promote-spine: a lesson written into a promotion file is not thereby learned — in the same session that captured "when a symptom survives two fixes, suspect the source of truth, not the reader", the agent queued a third reader substitution as the fix; the capture step and the application step are separate, and the one that matters is checked against the NEXT decision, not the write-up]
+
+[promote-spine: a design gate that only ever fires when the user demands it has already failed — BootIt's progress indicator passed all three C-TRIMODEL tests (foundational, hard-to-reverse because each iteration costs a 40-minute human-gated run to falsify, genuinely open) and the agent queued a patch instead of flagging it; the tell for "hard to reverse" is not just rework cost but how EXPENSIVE FALSIFICATION IS, because a decision that cannot be cheaply tested will ship wrong repeatedly]
+
 ## 2026-08-03 — Phase 0 ran, and Cancel was still dead
 
 **Commits:** `512575b` → `12f51b1` (6 this session), all pushed.
