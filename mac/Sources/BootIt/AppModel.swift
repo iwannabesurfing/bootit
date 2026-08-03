@@ -90,12 +90,31 @@ final class AppModel: ObservableObject {
     @Published var running = false
     @Published var currentPhase: WritePhase?
 
-    private let worker = DispatchQueue(label: "bootit.worker", qos: .userInitiated)
+    /// The pipeline queue. Serial, and occupied for the whole run — including the
+    /// 10–20 minutes spent inside a single privileged call. Not `private` only so
+    /// a test can occupy it the way a real write does; nothing else submits here.
+    let worker = DispatchQueue(label: "bootit.worker", qos: .userInitiated)
+
+    /// Cancellation must never be posted to `worker`. The operation a cancel is
+    /// meant to stop is the very thing blocking that queue, so the block would
+    /// not run until it had already finished. Measured 2026-08-03: two presses,
+    /// then forty more minutes of writing, through to a successful completion.
+    private let cancelQueue = DispatchQueue(label: "bootit.cancel", qos: .userInitiated)
+
+    /// How a cancel reaches the privileged daemon. Injectable so the queue choice
+    /// above is provable by a test instead of being re-broken a third time.
+    private let privilegedCancel: () -> Void
+
     private let cancelFlag = CancelFlag()
+
     /// Bumped on every catalogue load; a completion whose id no longer matches
     /// has been superseded (e.g. the user switched Windows version mid-fetch)
     /// and must not write its stale results.
     private var catalogLoadID = 0
+
+    init(privilegedCancel: @escaping () -> Void = { PrivilegedHelper.shared.cancel() }) {
+        self.privilegedCancel = privilegedCancel
+    }
 
     var osKey: String { osChoice.rawValue }
     var selectedDrive: USBDisk? {
@@ -322,10 +341,12 @@ final class AppModel: ObservableObject {
         cancelFlag.cancel()
         log("Cancelling…")
         // The flag alone only stops the pipeline between phases. Nearly all the
-        // wall-clock time is inside a single privileged call, so without this
-        // the button did nothing at all for up to twenty minutes — the whole
-        // cancellation path existed and was never connected to it.
-        worker.async { PrivilegedHelper.shared.cancel() }
+        // wall-clock time is inside a single privileged call, so the daemon has
+        // to be told directly — and told on a queue that is not `worker`, which
+        // that same call is blocking. Posting it to `worker` (as this did until
+        // 2026-08-03) queues the cancel behind the operation it cancels, so the
+        // message never leaves the app and the write runs to completion.
+        cancelQueue.async { [privilegedCancel] in privilegedCancel() }
     }
 
     /// Reset to the start for "Make Another".
