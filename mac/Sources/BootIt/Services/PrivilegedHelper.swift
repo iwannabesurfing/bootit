@@ -78,7 +78,18 @@ final class PrivilegedHelper {
     private var inFlight: (() -> Void)?
     private var inFlightFailure: Error?
 
-    private init() {}
+    /// Where `call()` gets the daemon from.
+    ///
+    /// `nil` in the app: it opens the real XPC connection. A test supplies a
+    /// stand-in, because everything worth proving here is the blocking and
+    /// unblocking *around* the call — an untimed wait that must survive a
+    /// 40-minute write and still not outlive a dead helper — and none of that
+    /// needs a root daemon to exercise.
+    private let proxyProvider: (() throws -> HelperProtocol)?
+
+    init(proxyProvider: (() throws -> HelperProtocol)? = nil) {
+        self.proxyProvider = proxyProvider
+    }
 
     // MARK: - Registration
 
@@ -155,6 +166,8 @@ final class PrivilegedHelper {
     // MARK: - Connection
 
     private func proxy() throws -> HelperProtocol {
+        if let proxyProvider { return try proxyProvider() }
+
         lock.lock()
         defer { lock.unlock() }
 
@@ -181,10 +194,10 @@ final class PrivilegedHelper {
             // invalidationHandler only — so a write in progress used to hang on
             // its semaphore forever with no error and no recovery.
             conn.invalidationHandler = { [weak self] in
-                self?.failInFlight(HelperError.notConnected("the helper was disconnected"))
+                self?.connectionFailed(HelperError.notConnected("the helper was disconnected"))
             }
             conn.interruptionHandler = { [weak self] in
-                self?.failInFlight(HelperError.notConnected("the helper stopped unexpectedly"))
+                self?.connectionFailed(HelperError.notConnected("the helper stopped unexpectedly"))
             }
             conn.resume()
             connection = conn
@@ -208,7 +221,13 @@ final class PrivilegedHelper {
     }
 
     /// Abandon whatever call is waiting, and drop the connection.
-    private func failInFlight(_ error: Error) {
+    ///
+    /// Internal rather than private so a test can drive it: `call()` waits
+    /// *untimed*, so this is the only thing standing between a dead helper and a
+    /// write that hangs forever. The two handler assignments above are one line
+    /// each and are **not** covered by those tests — what is covered is what
+    /// happens once one of them fires.
+    func connectionFailed(_ error: Error) {
         lock.lock()
         let signal = inFlight
         inFlight = nil
@@ -353,14 +372,30 @@ final class PrivilegedHelper {
     /// 10–20 minutes. The connection's invalidation handler is what catches a
     /// helper that dies, not a clock.
     private func call(_ body: (HelperProtocol, @escaping (NSError?) -> Void) -> Void) throws {
-        let helper = try proxy()
         var failure: NSError?
         let done = DispatchSemaphore(value: 0)
 
+        // Registered *before* the proxy is obtained, not after.
+        //
+        // The other order left a window: a connection dying between `proxy()`
+        // returning and this registration found `inFlight` still nil, so it had
+        // nothing to signal, and the `inFlightFailure` it recorded was then
+        // wiped by this very line. The reply for a call sent down a dead
+        // connection never arrives, so `done.wait()` below — untimed — waited
+        // for it forever. The window is small; the consequence was unbounded.
         lock.lock()
         inFlightFailure = nil
         inFlight = { done.signal() }
         lock.unlock()
+
+        defer {
+            lock.lock()
+            inFlight = nil
+            inFlightFailure = nil
+            lock.unlock()
+        }
+
+        let helper = try proxy()
 
         body(helper) { error in
             failure = error
@@ -372,9 +407,7 @@ final class PrivilegedHelper {
         done.wait()
 
         lock.lock()
-        inFlight = nil
         let connectionError = inFlightFailure
-        inFlightFailure = nil
         lock.unlock()
 
         if let connectionError { throw connectionError }
