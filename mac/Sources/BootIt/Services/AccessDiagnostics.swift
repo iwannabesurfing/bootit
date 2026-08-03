@@ -33,6 +33,29 @@ enum AccessDiagnostics {
         let helperDenial: String?     // nil when the helper can write
         let helperError: String?      // set when the helper couldn't be reached
 
+        /// Whether the daemon classified its refusal as a TCC denial specifically.
+        ///
+        /// Separate from `helperDenial` being non-nil, because the two answer
+        /// different questions. A helper that cannot write is *blocked* either
+        /// way, but only this one is fixed in Full Disk Access — a read-only
+        /// volume, a full disk or an I/O error are all refusals that sending the
+        /// user to that settings pane does nothing about. This is what decides
+        /// whether the UI offers the button, so that offering it is a fact from
+        /// the daemon rather than an inference from "something went wrong".
+        let helperNeedsFullDiskAccess: Bool
+
+        init(volume: String?,
+             appCanWrite: Bool?,
+             helperDenial: String? = nil,
+             helperError: String? = nil,
+             helperNeedsFullDiskAccess: Bool = false) {
+            self.volume = volume
+            self.appCanWrite = appCanWrite
+            self.helperDenial = helperDenial
+            self.helperError = helperError
+            self.helperNeedsFullDiskAccess = helperNeedsFullDiskAccess
+        }
+
         var helperCanWrite: Bool? {
             guard helperError == nil else { return nil }
             return helperDenial == nil
@@ -122,6 +145,26 @@ enum AccessDiagnostics {
         return true
     }
 
+    /// What a probe reply means for the report.
+    ///
+    /// Pulled out as a pure function rather than left inline in `run()`, which
+    /// cannot be driven from a test without a root daemon and a real USB stick.
+    /// The last bug this project shipped was a well-tested pure core fed by an
+    /// untested wire, and this is that wire — a mutation dropping the
+    /// classification here survived the whole suite until this existed.
+    ///
+    /// The associated value, deliberately, not `localizedDescription`: for the
+    /// TCC case the latter is a paragraph of instructions that `summary` is
+    /// about to write itself, and the daemon's own one-line reason is what
+    /// belongs beside it.
+    static func classify(_ refusal: HelperError?) -> (denial: String?, needsFullDiskAccess: Bool) {
+        switch refusal {
+        case .needsFullDiskAccess(let reason): return (reason, true)
+        case .some(let other):                 return (other.localizedDescription, false)
+        case nil:                              return (nil, false)
+        }
+    }
+
     /// Blocks; call off the main queue.
     static func run() -> Report {
         guard let volume = externalVolumes().first else {
@@ -131,20 +174,19 @@ enum AccessDiagnostics {
 
         var denial: String?
         var failure: String?
+        var needsFullDiskAccess = false
         do {
             // Must come first. A daemon from an older build stays resident and
             // answers happily, but without whatever method was added since —
             // which reads as "the helper is broken" rather than "the helper is
             // stale". ensureReady() is what notices the version gap.
             try PrivilegedHelper.shared.ensureReady()
-            // The reason arrives as an NSError carrying a HelperFailure code, so
-            // there is no marker to strip any more — the message is just the
-            // message, and the classification travels beside it.
-            denial = try PrivilegedHelper.shared.probeWrite(volumePath: volume)?
-                .localizedDescription
+            (denial, needsFullDiskAccess) =
+                classify(try PrivilegedHelper.shared.probeWrite(volumePath: volume))
         } catch {
             failure = error.localizedDescription
         }
-        return Report(volume: volume, appCanWrite: app, helperDenial: denial, helperError: failure)
+        return Report(volume: volume, appCanWrite: app, helperDenial: denial, helperError: failure,
+                      helperNeedsFullDiskAccess: needsFullDiskAccess)
     }
 }

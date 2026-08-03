@@ -356,8 +356,19 @@ final class PrivilegedHelper {
     }
 
     /// Ask the daemon whether it can write to `volumePath`. Returns the denial
-    /// reason, or nil if it can.
-    func probeWrite(volumePath: String) throws -> NSError? {
+    /// already classified, or nil if it can.
+    ///
+    /// Routed through `decode` like every other reply rather than handing back a
+    /// raw `NSError`. This was the last call that skipped it, and the cost was
+    /// not theoretical: the classification the daemon had gone to the trouble of
+    /// sending — TCC refusal, or any of the ordinary reasons a write fails —
+    /// was flattened to a string at the boundary, so the only caller could not
+    /// tell a Full Disk Access problem from a read-only volume and had to offer
+    /// the same remedy for both.
+    ///
+    /// The daemon's own sentence is not lost by decoding: it survives as the
+    /// associated value, which is what the caller shows.
+    func probeWrite(volumePath: String) throws -> HelperError? {
         let helper = try proxy()
         var result: NSError?
         let done = DispatchSemaphore(value: 0)
@@ -368,7 +379,7 @@ final class PrivilegedHelper {
         guard done.wait(timeout: .now() + 20) == .success else {
             throw HelperError.notConnected("the helper did not respond")
         }
-        return result
+        return result.map(Self.decode)
     }
 
     func cancel() {
@@ -386,7 +397,7 @@ final class PrivilegedHelper {
     /// rather than guessed at. An error from outside the daemon's own domain is
     /// passed through untouched: it came from XPC itself, and rewording it would
     /// only hide where it came from.
-    static func decode(_ error: NSError) -> Error {
+    static func decode(_ error: NSError) -> HelperError {
         guard error.domain == HelperInfo.errorDomain else {
             return HelperError.operationFailed(error.localizedDescription)
         }

@@ -35,7 +35,11 @@ private final class StubHelper: NSObject, HelperProtocol {
         reply(true)
     }
 
-    func probeWrite(volumePath: String, reply: @escaping (NSError?) -> Void) { reply(nil) }
+    /// What the daemon says when asked whether it can write. Configurable for
+    /// the same reason `onErase` is: the interesting cases are its refusals.
+    var onProbe: (@escaping (NSError?) -> Void) -> Void = { reply in reply(nil) }
+
+    func probeWrite(volumePath: String, reply: @escaping (NSError?) -> Void) { onProbe(reply) }
 }
 
 /// `PrivilegedHelper.call()` is the app's whole relationship with a root daemon,
@@ -98,6 +102,43 @@ final class PrivilegedCallTests: XCTestCase {
             }
         }
         XCTAssertFalse(helper.isBusy)
+    }
+
+    /// `probeWrite` was the last reply that skipped `decode()`, handing back a
+    /// raw `NSError` and flattening the daemon's classification into a string.
+    /// The only caller then could not tell a TCC denial — the one failure with a
+    /// fix the user can perform — from a read-only volume, and offered the Full
+    /// Disk Access pane for both.
+    func testAProbeRefusalArrivesClassifiedRatherThanAsAString() throws {
+        let stub = StubHelper()
+        stub.onProbe = { reply in
+            reply(HelperInfo.failure(.needsFullDiskAccess, "Operation not permitted"))
+        }
+        let helper = PrivilegedHelper { stub }
+
+        guard case .needsFullDiskAccess(let reason) = try helper.probeWrite(volumePath: "/Volumes/X") else {
+            return XCTFail("the daemon's classification did not survive the boundary")
+        }
+        XCTAssertEqual(reason, "Operation not permitted",
+                       "and its own sentence survives inside the classification")
+    }
+
+    func testAProbeRefusalForAnyOtherReasonIsNotBlamedOnFullDiskAccess() throws {
+        let stub = StubHelper()
+        stub.onProbe = { reply in
+            reply(HelperInfo.failure(.operationFailed, "Read-only file system"))
+        }
+        let helper = PrivilegedHelper { stub }
+
+        guard case .operationFailed(let message) = try helper.probeWrite(volumePath: "/Volumes/X") else {
+            return XCTFail("a non-TCC refusal must not be reported as a TCC refusal")
+        }
+        XCTAssertEqual(message, "Read-only file system")
+    }
+
+    func testAHelperThatCanWriteReportsNoRefusalAtAll() throws {
+        let helper = PrivilegedHelper { StubHelper() }
+        XCTAssertNil(try helper.probeWrite(volumePath: "/Volumes/X"))
     }
 
     /// `uninstall()` refuses while busy and `ensureReady()` won't replace a stale
