@@ -149,10 +149,6 @@ private final class HelperService: NSObject, HelperProtocol {
 
     // MARK: - HelperProtocol
 
-    func helperVersion(reply: @escaping (String) -> Void) {
-        reply(HelperInfo.version)
-    }
-
     func helperFingerprint(reply: @escaping (String) -> Void) {
         reply(Self.launchFingerprint)
     }

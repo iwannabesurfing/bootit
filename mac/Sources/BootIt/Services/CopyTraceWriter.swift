@@ -16,6 +16,16 @@ final class CopyTraceWriter {
 
     /// Where traces go. `~/Library/Logs/BootIt/` — the folder Console.app shows
     /// and the one people are told to look in when asked for diagnostics.
+    ///
+    /// Neither the writer nor the pruner checks that this resolves to a real
+    /// directory rather than a symlink, and that is a deliberate stopping point
+    /// rather than an oversight. Planting one requires code already running as
+    /// this user, and the ceiling on the damage is that BootIt creates and
+    /// deletes JSON files somewhere that attacker already owns outright.
+    ///
+    /// The version of this bug that *would* matter is a root-owned writer
+    /// following a symlink a user planted, which is exactly why the trace is
+    /// written here by the app and not by the daemon that has the privileges.
     static var directory: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/BootIt", isDirectory: true)
@@ -23,6 +33,11 @@ final class CopyTraceWriter {
 
     private let url: URL
     private var handle: FileHandle?
+    /// Latched, so `close()` means closed. `append` opens the file lazily, so
+    /// without this a sample arriving after the run ended would reopen a trace
+    /// that had already been finished and add a line to it — and a sample
+    /// arriving after the run ends is the tail of every run.
+    private var isClosed = false
     /// Serial: samples arrive on the XPC delivery queue, and a trace interleaved
     /// by two threads is not a trace.
     private let queue = DispatchQueue(label: "bootit.copy-trace", qos: .utility)
@@ -49,6 +64,7 @@ final class CopyTraceWriter {
     /// otherwise going fine.
     func append(_ sample: CopySample) {
         queue.async { [self] in
+            guard !isClosed else { return }
             guard let line = try? sample.traceLine(), let data = line.data(using: .utf8) else { return }
             if handle == nil { handle = openFile() }
             try? handle?.write(contentsOf: data)
@@ -57,6 +73,7 @@ final class CopyTraceWriter {
 
     func close() {
         queue.async { [self] in
+            isClosed = true
             try? handle?.close()
             handle = nil
         }

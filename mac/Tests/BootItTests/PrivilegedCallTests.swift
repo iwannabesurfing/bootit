@@ -17,7 +17,6 @@ private final class StubHelper: NSObject, HelperProtocol {
     private(set) var erasedDisk: String?
     private(set) var cancelCount = 0
 
-    func helperVersion(reply: @escaping (String) -> Void) { reply("stub") }
     func helperFingerprint(reply: @escaping (String) -> Void) { reply("stub") }
 
     func eraseDisk(_ disk: String, volumeName: String, reply: @escaping (NSError?) -> Void) {

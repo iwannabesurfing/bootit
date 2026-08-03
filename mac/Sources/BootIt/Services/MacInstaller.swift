@@ -266,6 +266,10 @@ final class MacInstaller {
             onLog: { [onLog] line in onLog(line) },
             onProgress: { [onProgress] fraction, status in onProgress(fraction, status) },
             onSample: { [onSample] sample in onSample(sample) })
+        // However this write ends, the handlers stop belonging to anything. A
+        // late sample reaching a finished run's closures reopened a closed trace
+        // and revived a liveness line for a drive nothing was writing to.
+        defer { PrivilegedHelper.shared.clearHandlers() }
         onPhase(.preparing)
         onLog("Checking BootIt's privileged helper…")
         try PrivilegedHelper.shared.ensureReady()

@@ -17,6 +17,14 @@ public enum ProcessIOCounters {
 
     /// Cumulative bytes written by `pid`, or nil if it has exited or cannot be
     /// inspected.
+    ///
+    /// The `withMemoryRebound` is not a workaround to be tidied away. C declares
+    /// the out-parameter as `rusage_info_t *`, and `rusage_info_t` is itself
+    /// `void *` — so the parameter is a `void **` that the kernel fills with a
+    /// versioned struct chosen by the flavour argument. Rebinding
+    /// `UnsafeMutablePointer<rusage_info_v4>` to `rusage_info_t?` is how Swift
+    /// spells that; passing `&info` directly does not compile, and casting it any
+    /// other way writes the struct through the wrong type.
     public static func bytesWritten(pid: pid_t) -> Int64? {
         var info = rusage_info_v4()
         let result = withUnsafeMutablePointer(to: &info) { pointer -> Int32 in

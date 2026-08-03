@@ -119,9 +119,6 @@ public enum HelperInterface {
 /// 20-minute `createinstallmedia` isn't a single silent call.
 @objc public protocol HelperProtocol {
 
-    /// Used to detect a stale daemon left behind by an earlier app version.
-    func helperVersion(reply: @escaping (String) -> Void)
-
     /// Hash of the binary this daemon is actually *running*, captured at launch.
     ///
     /// The version constant only catches a stale daemon if someone remembers to

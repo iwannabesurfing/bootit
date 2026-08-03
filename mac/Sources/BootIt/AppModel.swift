@@ -205,11 +205,27 @@ final class AppModel: ObservableObject {
     /// is a pure function of them — `CopyProgressModelTests` drives the identical
     /// code from a recorded trace, so the screen can be falsified without a
     /// forty-minute write.
+    /// Mutated on the main queue and nowhere else. That is not a style choice:
+    /// samples arrive on the XPC connection's own delivery thread while the end
+    /// of a run arrives on `worker`, and this first shipped folding the sample in
+    /// on whichever thread delivered it, hopping only the derived state to main.
+    /// ThreadSanitizer reported the race in `ingest` and `track` and killed the
+    /// test process outright.
+    ///
+    /// The window is not exotic — it is the tail of *every* run.
+    /// `DispatchSourceTimer.cancel()` does not interrupt a handler that is
+    /// already running, and the daemon stops sampling only after sending the
+    /// reply that unblocks the app, so the last sample always races the end.
+    ///
+    /// The main queue is serial, so hopping first makes the reducer single-writer
+    /// for free. It is the discipline the rest of this subsystem already uses —
+    /// the daemon locks `lastFraction`, the trace writer owns a serial queue —
+    /// and this was the one place it was missed.
     private var copyModel = CopyProgressModel()
 
-    private func ingest(_ sample: CopySample) {
-        let state = copyModel.ingest(sample)
+    func ingest(_ sample: CopySample) {
         onMain {
+            let state = self.copyModel.ingest(sample)
             self.copyState = state
             self.statusText = state.status
         }
@@ -217,9 +233,11 @@ final class AppModel: ObservableObject {
 
     /// Called when the copy phase ends, so a finished or failed run does not
     /// leave a liveness line describing a drive nothing is writing to.
-    private func endCopyReporting() {
-        copyModel = CopyProgressModel()
-        onMain { self.copyState = nil }
+    func endCopyReporting() {
+        onMain {
+            self.copyModel = CopyProgressModel()
+            self.copyState = nil
+        }
     }
 
     // MARK: - What the ring shows

@@ -45,7 +45,11 @@ enum HelperError: LocalizedError {
 
 /// Receives the helper's progress callbacks and forwards them to whoever is
 /// currently driving a write.
-private final class HelperCallbacks: NSObject, HelperClientProtocol {
+///
+/// Internal rather than private so a test can deliver a callback directly. The
+/// alternative is that "a sample arriving after the run ended is ignored" stays
+/// unprovable, and that is the defect this class most recently had.
+final class HelperCallbacks: NSObject, HelperClientProtocol {
     var onLog: (String) -> Void = { _ in }
     var onProgress: (Double, String) -> Void = { _, _ in }
     var onSample: (CopySample) -> Void = { _ in }
@@ -79,7 +83,9 @@ final class PrivilegedHelper {
 
     static let shared = PrivilegedHelper()
 
-    private let callbacks = HelperCallbacks()
+    /// Internal for the same reason `HelperCallbacks` is. Nothing outside this
+    /// file sets these — `setHandlers`/`clearHandlers` own that.
+    let callbacks = HelperCallbacks()
     private var connection: NSXPCConnection?
     private let lock = NSLock()
     /// Signalled when a call in flight must give up — the helper died, or the
@@ -298,12 +304,17 @@ final class PrivilegedHelper {
         return result
     }
 
-    // `currentHelperVersion()` lived here until 2026-08-04, with one occurrence
-    // in the codebase — its own definition. It was superseded by the fingerprint
-    // check above, which cannot be forgotten the way a hand-bumped constant can,
-    // and Swift does not warn on an unused private method. `helperVersion` stays
-    // on the XPC protocol: it costs nothing, and it is the one thing that can
-    // still be asked of a daemon too old to know what a fingerprint is.
+    // `currentHelperVersion()` and the `helperVersion` XPC method both lived
+    // here until 2026-08-04, superseded by the fingerprint check above, which
+    // cannot be forgotten the way a hand-bumped constant can.
+    //
+    // The first pass at this deleted the caller and kept the protocol method,
+    // with a comment claiming it was the fallback for "a daemon too old to know
+    // what a fingerprint is". Nothing implemented that fallback — the comment
+    // described an intention, and a reviewer rightly called it a third instance
+    // of the dead code the same commit claimed to be removing. It buys nothing
+    // real either: a daemon that cannot answer `helperFingerprint` fails the
+    // call, and a failed call already means re-register.
 
     func setHandlers(onLog: @escaping (String) -> Void,
                      onProgress: @escaping (Double, String) -> Void,
@@ -311,6 +322,23 @@ final class PrivilegedHelper {
         callbacks.onLog = onLog
         callbacks.onProgress = onProgress
         callbacks.onSample = onSample
+    }
+
+    /// Detach the current run's handlers.
+    ///
+    /// This is a singleton, so handlers set for one run stayed live until the
+    /// *next* run replaced them. A sample still in flight when the run ended —
+    /// which is the tail of every run, since the daemon stops sampling only after
+    /// sending its reply — then reached closures belonging to work that was over:
+    /// reopening a trace file that had been closed, and putting a liveness line
+    /// back on a screen the user may already have left.
+    ///
+    /// Clearing at the end rather than only at the start makes "this run is
+    /// finished" a thing the object actually knows.
+    func clearHandlers() {
+        callbacks.onLog = { _ in }
+        callbacks.onProgress = { _, _ in }
+        callbacks.onSample = { _ in }
     }
 
     func erase(disk: String, volumeName: String) throws {
