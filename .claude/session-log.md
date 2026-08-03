@@ -1,5 +1,159 @@
 # BootIt — session log
 
+## 2026-08-03 — Phase 0 ran, and Cancel was still dead
+
+**Commits:** `512575b` → `12f51b1` (6 this session), all pushed.
+
+**CI:** green, SHA-anchored to `12f51b1` (run `30775863931`, `headSha` verified equal to
+`git rev-parse HEAD`).
+**Local:** receipt `.claude/receipts/bootit-green.build-test-lint.receipt.txt` —
+110 tests, 0 failures, 0 SwiftLint violations across 33 files, **0 compiler warnings**.
+(98 tests at session start.)
+
+### The headline
+
+The previous session ended with three commits that had restructured the daemon's threading
+model and **never been run**. Phase 0 existed to check them before anything was built on
+top. It found that the restructuring was fine and that **Cancel had never worked** — for the
+second session running, and for a different reason each time.
+
+Measured, not inferred: Cancel pressed twice at 09:33, then `createinstallmedia` wrote for
+**forty more minutes** and exited normally at 10:14 having never been signalled. The stick
+came out a valid installer. `sudo kill` reported "no such process" because it had already
+finished on its own.
+
+### Phase 0 — all three checks answered
+
+| Check | Result |
+|---|---|
+| One full run to green | **PASS** — `.IAPhysicalMedia`, `boot.efi`, BaseSystem, Firmware all present |
+| Cancel mid-copy | **FAIL** → fixed → re-verified: process died, bytes froze at 1.3 GB, no orphan |
+| Helper exits ~30 s after the app goes quiet, never mid-write | **PASS** — 31 s, and it correctly stayed up through the whole 40-minute write |
+
+Run order was deliberately inverted from the plan — Cancel first, then the full run — so
+that Cancel failed fast, and so the full run afterwards doubled as the test that a cancelled
+run released its `ActiveWork` disk claim. In the planned order nothing checked that.
+
+### The cancel bug
+
+`AppModel.cancel()` posted the daemon-facing cancel to `worker` — the **serial** queue that
+`runPipeline` occupies for the entire privileged write, blocked inside an untimed
+`done.wait()`. The block queued behind the operation it was meant to stop, so the XPC message
+never left the app. `"Cancelling…"` appeared because `log()` is synchronous.
+
+The previous session's fix had connected the wiring correctly and connected it to a queue
+that was already blocked. Every piece existed, again.
+
+The daemon side was innocent throughout: `cancelCurrentOperation` calls `runner.cancel()`
+directly rather than via `workQueue`, and `createInstallMedia` dispatches and returns, so the
+delivery queue was free. It was ready to receive a message that never arrived.
+
+Fixed on a dedicated `cancelQueue`, with the daemon-facing call injectable so a test can
+occupy `worker` exactly as a write does and prove the message still gets out. Reverting to
+`worker.async` fails that test in 2 s while the nothing-is-running case still passes, so it
+catches the real condition rather than the existence of a cancel path.
+
+### Cancelling looked like crashing
+
+With Cancel working for the first time, the screen behind it became reachable — and had
+never been seen. It reported the user's own choice as a fault: **"Something went wrong"**, a
+red banner reading `createinstallmedia failed: createinstallmedia exited 15`, a "What to try"
+hint, and a Copy Diagnostics button. Exit 15 is the SIGTERM BootIt itself sent, on request.
+The phase checklist called it "Failed".
+
+Now an informational banner, one plain sentence saying the drive is not bootable and to start
+over, no diagnostics to send, and the log left collapsed because nothing in it needs reading.
+`PhaseState.cancelled` renders a neutral stop mark. Tests assert both directions, so a real
+`createinstallmedia` error still gets the red banner and the hint.
+
+### Phase 1 — items 2 and 4
+
+- **Failures now cross XPC as `NSError` codes**, not a `"NEEDS_FULL_DISK_ACCESS: "` prefix the
+  app matched and sliced off. Three reviewers had flagged the prefix independently. `@objc`
+  cannot carry a Swift enum but `NSError` round-trips natively, so the classification the app
+  must act on travels as a code while the text is free to change.
+- **The copy poller is a `DispatchSourceTimer`**, not a `while` loop around `Thread.sleep(2)`.
+  The loop held a global-pool thread for the entire copy — forty minutes on this stick —
+  and could only notice a stop when its current sleep expired.
+
+Not done: item 1 (the `eraseDisk` move) and the rest of item 3 (`call()`, invalidation and
+cancel still untested; only the error decode has tests).
+
+### Issues discovered
+
+- **Two dead `catch` blocks around `setCodeSigningRequirement`** (pre-existing; confirmed
+  against a stashed tree). The method is non-throwing, so the daemon's block that read
+  "reject a connection failing the signing requirement" and the app's
+  "the helper failed its signature check" could never execute. The compiler had been warning
+  about it. **Security is unchanged** — XPC registers the requirement and invalidates a
+  failing connection itself, asynchronously; that is what actually enforces this. A malformed
+  requirement string raises an uncatchable ObjC exception, which the catch never covered.
+- **A safeguard that guarded nothing.** The `NSError` work first added explicit
+  `setClasses` whitelisting on both sides, with a comment asserting XPC does not allow
+  `NSError` in a reply by default, and a test asserting the whitelist. The test **passed with
+  the whitelisting deleted**. Measured directly: Foundation already infers `NSError` into the
+  allowed set from an `NSError?` signature. Safeguard and test both removed.
+- **CI was spinning a macOS runner for session-log commits** — three of ten commits in the
+  push were docs-only. Now `paths-ignore`; release DMG artifact capped at 7 days.
+- **The write is much slower than the UI claims** — ~3.3 MB/s on this stick, so 18.7 GB took
+  ~40 minutes against a log line promising "10–20 minutes". Not fixed.
+
+### Decisions
+
+- **Did not gate CI to release events**, which is what the CICOST-P1 finding prescribes. This
+  is an Apple Silicon SwiftPM app: build, test and lint cannot run on Linux, so gating would
+  remove main's only pre-release signal — and this repo has already shipped a release whose
+  main path could not work. `paths-ignore` is the lever that actually exists here. The
+  finding stays open and advisory, with the reasoning recorded in the workflow.
+- **Corrected the Phase 1 item 1 premise.** Moving `eraseDisk` out of the daemon was framed
+  as least privilege. It mostly isn't: `createinstallmedia` erases and reformats the target
+  and stays in the daemon, so a compromised daemon keeps its destructive reach. The real
+  benefit is de-duplication and testability of two erase paths that differ only in filesystem
+  and scheme. Worth doing on those grounds, not on security grounds.
+- **Rebuilt and reinstalled before every verification run**, rather than trusting that the
+  installed bundle matched HEAD. Last session shipped security fixes that were installed and
+  not in effect.
+
+### Test results
+
+110 tests, 0 failures. 98 at session start → 110. SwiftLint strict: 0 violations, 33 files.
+0 compiler warnings (2 at session start, both pre-existing).
+
+Three mutation checks proved the new tests bite: reverting the cancel to `worker.async` fails
+the blocked-queue test in 2 s; deleting the XPC whitelisting did **not** fail its test, which
+is how that safeguard was found to be fictional and removed.
+
+Not covered by tests, verified by hand: the full macOS write, the cancel, the helper's
+idle-exit timing.
+
+### Next session should start with
+
+1. **Verify the `NSError` change against a real run.** It rewrote every failure reply across
+   the XPC boundary and has only unit tests. Help → Privileged Helper… → **Test USB Access**
+   settles the success path in a minute; revoking Full Disk Access and pressing it again
+   exercises the error path.
+2. **Phase 1 item 3** — `PrivilegedHelper.call()`, invalidation failing an in-flight call, and
+   cancel are still untested. Needs a proxy-provider seam. No hardware required.
+3. **Phase 1 item 1** — factor the two erase implementations into one tested function in
+   `BootItShared`. Decide separately whether it also moves out of the daemon; see Decisions.
+4. **First-run Full Disk Access onboarding.** Users still meet the requirement as a failure.
+5. **Test whether `SMAppService` registration is admin-gated** — unknown, and it decides
+   whether a standard account can approve a system-wide root daemon.
+6. **Version bump + tag + notarised release.** GitHub still ships v3.1.0, whose macOS path
+   cannot work. This remains the release that matters.
+
+[promote-spine: a cancellation dispatched onto the same serial queue the work occupies can never run — it queues behind the operation it exists to stop, the UI's synchronous "Cancelling…" line appears, and nothing else happens; BootIt shipped this twice, first with nothing calling cancel at all, then with the call posted to the blocked queue]
+
+[promote-spine: a test written alongside a defensive safeguard must be mutation-checked against deleting the safeguard — BootIt added explicit XPC class whitelisting, a comment asserting it was required, and a test asserting it was present; the test passed with the safeguard deleted, because the framework already did it]
+
+[promote-spine: repairing a dead code path makes the UI behind it reachable for the first time, and that screen has never been reviewed by anyone — BootIt's working Cancel immediately revealed a completion screen reporting the user's own choice as a crash, with diagnostics offered for a SIGTERM the app itself had sent]
+
+[promote-spine: when instrumenting a human-driven verification run, size the monitor's lifetime to HUMAN latency (hours), not agent latency (minutes) — a one-hour process monitor expired three hours before the user started the run, and the timeline it existed to capture was lost]
+
+[promote-spine: a CI cost rule of the form "gate the expensive platform build to release events" is wrong for a repo whose only supported platform IS the expensive runner — gating removes the default branch's sole pre-release signal, and the lever that actually exists is paths-ignore for doc-only commits]
+
+[promote-profile:swift: `try` on a non-throwing Objective-C method compiles with only a warning, so a do/catch around `NSXPCConnection.setCodeSigningRequirement` reads as an enforcement check while the catch can never execute — the enforcement is XPC's own asynchronous connection invalidation, and a malformed requirement raises an uncatchable ObjC exception instead]
+
 ## 2026-08-02 — the macOS path actually works: privileged helper + the TCC grant
 
 **Commits:** `deb1a76` → `e33d0d3` (7 this session, none pushed).
