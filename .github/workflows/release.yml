@@ -87,6 +87,11 @@ jobs:
           name: BootIt-dmg
           path: mac/dist/BootIt.dmg
           if-no-files-found: error
+          # 7 days, not the 90-day default. This artifact is an input to the
+          # human publish step (and the dry-run's only output), not the
+          # deliverable — the deliverable is the DMG attached to the GitHub
+          # release below, and any build is reproducible from its tag.
+          retention-days: 7
 
       # Only ever publish a signed, notarised build. Without the signing secrets
       # this job still builds and uploads an artifact, so the pipeline stays

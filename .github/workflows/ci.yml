@@ -1,10 +1,31 @@
 name: CI
 
+# A macOS runner bills at roughly 10x a Linux one, and this job cannot move off
+# macOS: it is a SwiftPM app for Apple Silicon, so the build, the tests and
+# SwiftLint all need the Apple toolchain. The lever that is actually available
+# is not running it when nothing it checks has changed — roughly a third of the
+# commits here are session-log or README edits, and each one was spinning a full
+# macOS build.
+#
+# Not gated on `github.ref` or to release events: that would leave the default
+# branch's only build/test/lint signal firing after the fact, which is worth far
+# more than the runner minutes it would save. If branch protection is ever added,
+# note that a docs-only PR will have no CI run to satisfy a required check.
 on:
+  # Spelled out twice on purpose: GitHub's workflow parser does not resolve YAML
+  # anchors, so a `&docs` / `*docs` pair that validates locally fails on push.
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.claude/**'
+      - 'LICENSE'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.claude/**'
+      - 'LICENSE'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
