@@ -1,5 +1,177 @@
 # BootIt — session log
 
+## 2026-08-04 — the progress bar stopped claiming a percentage, and review found the race
+
+**Commits:** `06e184e` → `db3d349` (3 this session), all pushed.
+
+**CI:** green, SHA-anchored to `db3d349` (run `30855199681`, `headSha` verified equal to
+`git rev-parse HEAD`).
+**Local:** receipt `.claude/receipts/bootit-green.build-test-lint.receipt.txt` —
+**173 tests, 0 failures**, 0 SwiftLint violations across 40 files, 0 compiler warnings.
+(143 tests and 34 files at session start.) Additionally **ThreadSanitizer-clean** across the full
+suite, which is new and is the only reason this session's worst bug was provable.
+
+### The headline
+
+Implemented the tri-model decision from `docs/research/copy-progress-reporting-*`: **the macOS copy
+phase no longer claims a percentage.** The ring goes indeterminate for the opaque stretch and
+carries throughput, bytes written and elapsed beside it — the liveness figures BootIt has never had,
+and the actual answer to the question three previous "fixes" kept mis-hearing as *what percentage is
+done*.
+
+The reader moved from filesystem used-bytes to the device's own `IOBlockStorageDriver` counter, and
+the state machine became a pure function of a sample stream. Every run now writes a trace to
+`~/Library/Logs/BootIt/`. That shape is the point: the three previous versions could only be
+falsified by a 40-minute human-gated write, which is precisely why three wrong answers shipped.
+
+### Evidence found on a stick that was still plugged in
+
+The SanDisk from the 2026-08-03 run was still attached with its counter never reset — perishable
+evidence, captured before it evaporated. Both readings are in `docs/research/copy-progress-measurements.md`,
+the ledger for the questions synthesis §5 left open.
+
+- **Device wrote 21.266 GB to land 20.105 GB of payload — a ratio of 1.058.** Write amplification is
+  therefore not disqualifying, but it runs in the dangerous direction: a payload denominator would
+  reach 100% about 6% early, which is exactly the failure ChatGPT's evidence bar names. Gemini's 95%
+  clamp is load-bearing, not decoration. Confidence LOW-MEDIUM — the baseline at run start is
+  assumed, not measured, which is what the new instrumentation fixes.
+- **An idle *mounted* volume ticks its journal ~275 B/s.** Zero drift over two minutes, 164,864 bytes
+  over ten.
+
+### Two bugs found by measuring rather than by reasoning
+
+- **The journal noise broke my own state machine.** It treated *any* counter increase as the drive
+  moving, so a drive that had genuinely wedged — but was still mounted — would never be reported as
+  wedged, because the noise kept resetting the silence clock. There is a 1 MB `movementFloor` now:
+  0.11 s of real writing at the measured rate, an hour of journal noise. **No unit test written at
+  the time would have caught this**; it came from reading the counter twice ten minutes apart.
+- **A grep for call sites caught two dead paths, one of them created this session.**
+  `pruneOldTraces` had exactly one occurrence — its own definition. Tested, and called by nothing;
+  traces would have grown without bound. Now called at launch.
+
+### The race independent review found
+
+`senior-swift-review` returned **no-go on "done as merged"**, and was right. `AppModel.copyModel` —
+a struct holding an `Array` — was mutated from two threads with nothing synchronising them:
+`ingest()` folded each sample in on whichever thread delivered it (the XPC connection's own) while
+`endCopyReporting()` reset the whole reducer from `worker`.
+
+**Not argued — observed.** Under `swift test --sanitize=thread` the new seam tests reported the race
+in `CopyProgressModel.ingest` and `.track` and killed the test process with signal 5. After the fix
+the full suite is TSAN-clean, and restoring the old ordering brings the warnings straight back.
+
+The window is **the tail of every run**, not an exotic one: `DispatchSourceTimer.cancel()` does not
+interrupt a handler already running, and the daemon stops sampling only after sending the reply that
+unblocks the app. A dropped connection opens it wider.
+
+The pointed part: I had named the IOKit retain/release as the top risk in the review brief, and it
+turned out to be the soundest part of the diff. **The defect was in the plain-Swift glue — because
+the reducer has 14 tests and the seam feeding it had none.**
+
+Two further findings from the same review, both taken:
+- Handlers on the `PrivilegedHelper` singleton were replaced only at the *start* of the next run,
+  never cleared at the end of one, so a late sample reached closures belonging to finished work —
+  reopening a closed trace file and reviving a liveness line. They detach in a `defer` now, and the
+  trace writer latches shut.
+- The previous commit deleted `currentHelperVersion()` as one-occurrence dead code **and left the
+  `helperVersion` XPC method in**, under a comment I wrote claiming it was the fallback for a daemon
+  too old to know what a fingerprint is. Nothing implemented that fallback. A comment describing an
+  intention made it a third instance of the very thing that commit claimed to be removing.
+
+`security-review` returned **go, no blockers** — the signature pinning removes the threat actor from
+the model for the new XPC callback, the trace is safe to attach to an issue, and pruning cannot be
+traversed. Its one note (the trace directory is not checked for being a symlink) is same-user-only
+and now recorded as a comment naming the ceiling.
+
+### The release secrets never vanished
+
+Queued task #5 has an answer and it is that the premise was wrong. v3.1.0's DMG was notarised
+**locally** by `package.sh` and uploaded **by hand** (`uploader=iwannabesurfing`, 11:16:53Z) — four
+seconds *before* the tag's CI run started at 11:16:57Z. That run skipped "Write notarisation API
+key", "Import Developer ID certificate" and "Publish GitHub release", and reported **success**.
+
+Last session read the notarised DMG as proof the secrets had existed and concluded they had been
+deleted. The DMG only ever proved the local keychain worked. The `bootit-distribution` memory
+recorded the true state correctly on 31 July — "which they don't yet — so releases are currently
+published by hand" — and has been updated so this is not re-opened as a mystery.
+
+It cost nothing this time, because restoring secrets that were never there is the same action as
+adding them. But it went into the record as an observation when it was an inference, and the next
+session inherited it as fact.
+
+### Decisions
+
+- **Kept the instrumentation** after the user asked whether ~1,000 lines was real or accretion.
+  Presented the honest split: ~90 of 319 new code lines are evidence-collection the feature does not
+  need to work, and 2 of 30 new symbols (`parseTrace`, `fileURL`) have no production caller. His
+  call, made with the counter-evidence in hand rather than a defence of the diff.
+- **No hardware run this session**, at the user's direction. The trace writer is always-on, so the
+  next real run produces fixture #1 without anything special being done.
+- **Deleted the payload-estimate machinery rather than leaving it unused.** It existed to be the
+  denominator of a percentage no longer claimed. Its measurements survive in the fixture and the
+  research record; four tests that pinned the rejected design went with it.
+- **Fixture #1 is a reconstruction, labelled as one.** Six measured points, linear interpolation
+  between them, and the mutation check only depends on the measured points. To be replaced by a
+  recorded trace at the first instrumented run.
+
+### Issues discovered
+
+- **My mutation harness reported a false "survives".** The first M8 run said the `clearHandlers`
+  mutation survived; it had never applied, and the harness could not tell a broken mutation from a
+  passing test. Re-run with a build check, it bites. **Every "survives" result from a mutation
+  harness that does not verify the build is worthless.**
+- **`parseTrace` and `fileURL` have no production caller** — the trace format's reader half and a
+  test-support accessor. Kept deliberately (a format nothing can read is worse), but they are the
+  same shape criticised elsewhere in this log and should not drift into being forgotten.
+- **TSAN is not in CI.** Three threading bugs have now shipped in this one subsystem — a cancel on
+  the queue it was meant to interrupt, a poller holding a global-pool thread for 40 minutes, and
+  this race. The third was caught by a two-second sanitizer run that nothing obliges anyone to do.
+
+### Test results
+
+173 tests, 0 failures (143 at session start). SwiftLint strict: 0 violations, 40 files. 0 compiler
+warnings. Full suite TSAN-clean. Receipt committed.
+
+**Nine mutation checks proved the new tests bite:** filesystem used-bytes as the source (7 tests),
+inferring "finishing" from silence (2), keeping a run total across a counter reset (1),
+re-introducing a percentage (1), dropping the baseline subtraction (2), removing the movement floor
+(1), mutating the model off-main again (TSAN, 8 warnings), `clearHandlers()` as a no-op (1), and the
+trace-writer latch removed (1).
+
+Not covered by tests, verified by inspection only: the `clearHandlers()` call site in
+`MacInstaller.write` (a `defer`, checked by grep — there is no seam that would let a unit test
+observe it), and the end-to-end daemon→app sample path, which has never run against real hardware.
+
+### Next session should start with
+
+1. **Stale-app detection + first-run Full Disk Access onboarding.** Unchanged as the largest
+   remaining UX defect now that the progress work has landed. "BootIt was updated while running,
+   quit and reopen" and "BootIt needs Full Disk Access before it can write" are the same class of
+   message, both belonging before the user commits to erasing a drive. Design call — options range
+   from a launch-time mtime watch to catching the XPC mismatch.
+2. **Add `swift test --sanitize=thread` to CI.** Flagged this session and not yet actioned. Three
+   threading bugs in one subsystem, the last found only because a sanitizer was run by hand.
+   Converts a repeat-offender bug class from hand-verification to green-or-red.
+3. **The first instrumented hardware run.** Human-gated, ~40 minutes, needs no code. Produces the
+   real fixture #1 and settles two open measurements at once: whether `processBytes` races and
+   freezes as Gemini predicts (§D2), and what the baseline actually is. **Build and install both
+   halves pinned together first** — the XPC protocol changed and the helper is now version 7.
+4. **Route `probeWrite` through `decode()`**, or accept that the `HelperFailure` →`HelperError`
+   mapping is unit-tested only and say so in a comment. Carried from last session, unchanged.
+5. **Decide `parseTrace` / `fileURL`** — keep as the trace format's reader half, or remove until
+   something in production reads a trace back.
+
+**Federation note:** the queue-drain budget was already over ceiling at session start
+(250 pending > 221, +29 owed) and this session adds 4. Capture was kept deliberately narrow.
+
+[promote-spine: when a well-tested pure core is fed by an untested seam, the bug is in the seam — BootIt's copy reducer had 14 tests and a recorded-trace replay harness while the glue delivering samples to it had none, and that glue mutated the reducer from the XPC delivery thread and the worker queue simultaneously; the review that found it went looking where the parent agent said the risk was (an IOKit retain/release walk, which was flawless) and found it where nobody had looked at all]
+
+[promote-spine: a mutation check that does not verify the build cannot tell a broken mutation from a surviving one — BootIt's harness reported SURVIVES for a `clearHandlers()` mutation whose patch had silently failed to apply, which reads as "this test does not bite" and would have justified deleting a test that bites perfectly well; every mutation harness must assert the mutated tree compiles before believing any survival result]
+
+[promote-spine: deleting a caller is not deleting the dead code — BootIt removed `currentHelperVersion()` as one-occurrence dead code in the same commit that left the `helperVersion` XPC method it called standing, under a fresh comment asserting a fallback capability that nothing implemented; a comment describing an intention reads exactly like a comment describing behaviour, and it converted dead code into dead code with an alibi]
+
+[promote-spine: an inference recorded as an observation becomes the next session's fact — BootIt's log concluded that six CI signing secrets had been deleted, inferring it from a notarised DMG that had in truth been signed locally and uploaded by hand four seconds before CI even started; the memory written at the time recorded the true state and was overruled by the more recent, more confident, wrong entry, and a queued task existed for a session to investigate a disappearance that never happened]
+
 ## 2026-08-03 (session 2) — v3.2.0 shipped, and the progress bar lied for 33 minutes
 
 **Commits:** `26f20f7` → `8231f8b` (5 this session), all pushed. Tag **`v3.2.0`**, released
