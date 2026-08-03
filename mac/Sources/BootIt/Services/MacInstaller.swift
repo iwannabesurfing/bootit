@@ -39,6 +39,21 @@ struct MacOSGroup: Identifiable {
     var majorInt: Int { Int(versionLabel) ?? 0 }
     var latest: MacOSInstaller { builds[0] }   // safe: builds is non-empty by construction
 
+    /// Which group a title selects, falling back to the newest.
+    ///
+    /// Beside `group(_:)` rather than on the view model, because it is the same
+    /// kind of thing: a pure rule about this list, answerable without an app.
+    static func selected(_ groups: [MacOSGroup], titled title: String) -> MacOSGroup? {
+        groups.first { $0.id == title } ?? groups.first
+    }
+
+    /// Which build within a group a version string selects, falling back to the
+    /// group's own latest.
+    static func selected(_ group: MacOSGroup?, build: String) -> MacOSInstaller? {
+        guard let group else { return nil }
+        return group.builds.first { $0.build == build } ?? group.latest
+    }
+
     /// Group a flat installer list by major version, preserving order.
     static func group(_ installers: [MacOSInstaller]) -> [MacOSGroup] {
         var order: [String] = []

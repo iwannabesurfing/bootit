@@ -54,14 +54,8 @@ final class AppModel: ObservableObject {
     @Published var macAppPath = ""        // chosen existing "Install macOS *.app"
 
     var macOSGroups: [MacOSGroup] { MacOSGroup.group(macInstallers) }
-    var selectedMacGroup: MacOSGroup? {
-        let groups = macOSGroups
-        return groups.first { $0.id == selectedMacGroupTitle } ?? groups.first
-    }
-    var selectedMacInstaller: MacOSInstaller? {
-        guard let g = selectedMacGroup else { return nil }
-        return g.builds.first { $0.build == selectedMacBuild } ?? g.latest
-    }
+    var selectedMacGroup: MacOSGroup? { MacOSGroup.selected(macOSGroups, titled: selectedMacGroupTitle) }
+    var selectedMacInstaller: MacOSInstaller? { MacOSGroup.selected(selectedMacGroup, build: selectedMacBuild) }
 
     // Catalogue loading (shared)
     @Published var loadingCatalog = false
@@ -82,6 +76,10 @@ final class AppModel: ObservableObject {
     // Presentation-only disclosure state
     @Published var showsAdvancedWindowsOptions = false
     @Published var showsLogDetails = false
+
+    /// Can this app still do the work it is about to promise? A value type, so
+    /// mutating it republishes without a nested-observable subscription.
+    @Published var preflight: InstallPreflight
 
     // Progress
     @Published var progress: Double = 0
@@ -125,8 +123,10 @@ final class AppModel: ObservableObject {
     /// and must not write its stale results.
     private var catalogLoadID = 0
 
-    init(privilegedCancel: @escaping () -> Void = { PrivilegedHelper.shared.cancel() }) {
+    init(privilegedCancel: @escaping () -> Void = { PrivilegedHelper.shared.cancel() },
+         preflight: InstallPreflight = InstallPreflight()) {
         self.privilegedCancel = privilegedCancel
+        self.preflight = preflight
     }
 
     var osKey: String { osChoice.rawValue }
@@ -134,12 +134,61 @@ final class AppModel: ObservableObject {
         guard let index = diskIndex, index < disks.count else { return nil }
         return disks[index]
     }
-    var canStart: Bool { selectedDrive != nil && hasAcknowledgedErase }
+    var canStart: Bool { selectedDrive != nil && hasAcknowledgedErase && !preflight.appWasReplaced }
 
     /// Whether the options step has enough loaded to continue.
     var optionsReady: Bool {
         guard !loadingCatalog else { return false }
         return platform == .macos ? !macInstallers.isEmpty : !languages.isEmpty
+    }
+
+    // MARK: - Was this app replaced while it was open?
+
+    /// Cheap enough to run every time the app comes to the front, which is the
+    /// moment it matters: the user has just been in Finder dragging the new
+    /// version over the old one, and is coming back to a window whose code is
+    /// no longer the code in the bundle beneath it.
+    ///
+    /// Deliberately does not care whether a write is running. Setting the flag
+    /// interrupts nothing — it gates the *next* Start and shows a banner on the
+    /// steps before it, and the progress step shows neither. A run already under
+    /// way holds a live connection to the daemon it started with and is safer
+    /// finished than abandoned.
+    ///
+    /// The reading is taken wherever this is called; the decision it feeds is
+    /// made on the main queue. That is the discipline the whole subsystem now
+    /// uses after a reducer mutated from two threads shipped, and
+    /// `swift test --sanitize=thread` is a CI gate specifically so the next
+    /// version of that mistake fails a build rather than a drive.
+    func checkWhetherAppWasReplaced() {
+        let current = preflight.bundleIdentity()
+        onMain { self.preflight.noteBundleReading(current) }
+    }
+
+    // MARK: - Can the helper actually write to a USB drive?
+
+    /// Ask before the user has committed to erasing anything, rather than after.
+    ///
+    /// Only for macOS: the Windows path never goes near the privileged helper,
+    /// so there is no daemon for TCC to refuse and nothing here to report.
+    ///
+    /// The probe blocks on XPC, so it runs off the main queue — and pointedly
+    /// not on `worker`, which is occupied for the entire 40 minutes of a write.
+    /// Posting this there would leave the answer arriving after the run it was
+    /// meant to warn about.
+    /// Every read and write of the model's own state happens inside `onMain`,
+    /// including the generation counter — so this is correct whichever thread
+    /// calls it, rather than correct as long as every caller remembers.
+    func checkUSBAccess() {
+        onMain {
+            guard self.platform == .macos, self.selectedDrive != nil else { return }
+            let id = self.preflight.beginProbe()
+            let probe = self.preflight.usbAccessProbe
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let report = probe()
+                self?.onMain { self?.preflight.acceptProbe(report, id: id) }
+            }
+        }
     }
 
     // MARK: - Main-thread helpers
@@ -241,33 +290,14 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: - What the ring shows
+    //
+    // The rules themselves live in `CopyRing`, where they are a pure function of
+    // the state rather than a property of the object that owns it.
 
-    /// The ring's value, or nil for an indeterminate one.
-    ///
-    /// A copy in flight has no defensible percentage, so it gets no number. Once
-    /// the tool announces the bless step there is a real end in sight again and
-    /// the determinate bar returns for the last stretch.
-    var ringValue: Double? {
-        guard let copy = copyState else { return progress }
-        if case .finishing = copy.activity { return progress }
-        return copy.fraction
-    }
+    var ringValue: Double? { CopyRing.value(copyState, progress: progress) }
+    var livenessSymbol: String { CopyRing.symbol(copyState) }
+    var livenessIsWarning: Bool { CopyRing.isWarning(copyState) }
 
-    var livenessSymbol: String {
-        switch copyState?.activity {
-        case .idle:        return "exclamationmark.triangle.fill"
-        case .unmeasured:  return "questionmark.circle.fill"
-        default:           return "arrow.down.circle.fill"
-        }
-    }
-
-    /// Only a genuinely quiet drive is drawn as a warning. "Can't be measured"
-    /// is a limitation of the drive, not a fault in the run, and colouring it
-    /// like one would send people hunting for a problem that is not there.
-    var livenessIsWarning: Bool {
-        if case .idle = copyState?.activity { return true }
-        return false
-    }
     private func message(_ error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
@@ -448,6 +478,9 @@ final class AppModel: ObservableObject {
         selectedMacGroupTitle = ""; selectedMacBuild = ""; showOlderMacBuilds = false
         localISOPath = ""; macAppPath = ""; bypassWin11 = false
         catalogError = nil
+        // Only the findings that belong to a drive. `appWasReplaced` survives a
+        // reset by design — starting over does not un-replace the bundle.
+        preflight.forgetDrive()
     }
 
     private func runPipeline(_ request: BuildRequest) {

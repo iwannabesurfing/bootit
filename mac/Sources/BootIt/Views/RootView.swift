@@ -26,6 +26,13 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: Theme.transitionDuration), value: model.step)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Coming back to the front is the moment a replaced bundle can be
+        // noticed: the user has just been in Finder dragging the new version
+        // over the old one. One `stat`, so it is affordable every time.
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.checkWhetherAppWasReplaced()
+        }
         .navigationTitle("BootIt")
         .toolbar { toolbarContent }
         .confirmationDialog(eraseTitle,

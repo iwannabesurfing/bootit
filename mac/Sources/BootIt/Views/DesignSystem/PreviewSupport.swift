@@ -7,6 +7,16 @@ import Foundation
 /// Everything here is fabricated in memory. Nothing enumerates a disk, contacts
 /// Microsoft or Apple, or writes anything — a preview must never be able to
 /// reach real hardware. Excluded from release builds.
+/// Hands back a different number each time it is asked, so a preview can stage
+/// something that is only visible as a *change* between two readings.
+private final class Counter {
+    private var value: UInt64 = 0
+    func next() -> UInt64 {
+        value += 1
+        return value
+    }
+}
+
 enum PreviewModel {
 
     static let sampleDrives = [
@@ -69,6 +79,55 @@ enum PreviewModel {
         model.hasAcknowledgedErase = acknowledged
         return model
     }
+
+    /// The drive step as it looks when a pre-flight check has something to say.
+    ///
+    /// Both warnings are macOS-only — the Windows path never goes near the
+    /// privileged helper — so this fixes the platform rather than taking it.
+    static func preflightWarning(replaced: Bool = false,
+                                 access: AccessDiagnostics.Report? = nil) -> AppModel {
+        // The reading has to *change* between the one taken at init and the one
+        // taken by the check — a constant closure returns the same identity both
+        // times and nothing would ever look replaced.
+        let readings = Counter()
+        let model = AppModel(
+            preflight: InstallPreflight(
+                bundleIdentity: {
+                    AppBundleWatch.Identity(inode: replaced ? readings.next() : 0, device: 0)
+                },
+                usbAccessProbe: { access }))
+        model.platform = .macos
+        model.step = .usb
+        model.disks = sampleDrives
+        model.diskIndex = 0
+        if replaced {
+            // A second reading that disagrees with the one taken at init.
+            model.checkWhetherAppWasReplaced()
+        }
+        if let access {
+            // Through the real decision rather than by setting the field: a
+            // preview that bypasses `acceptProbe` would happily render a state
+            // the app cannot actually reach — an inconclusive report shown as a
+            // warning, for one, which is the exact bug this feature guards.
+            // `checkUSBAccess` is asynchronous and would not have landed by the
+            // time the preview renders.
+            let id = model.preflight.beginProbe()
+            model.preflight.acceptProbe(access, id: id)
+        }
+        return model
+    }
+
+    static let blockedByFullDiskAccess = AccessDiagnostics.Report(
+        volume: "/Volumes/Install macOS Tahoe",
+        appCanWrite: true,
+        helperDenial: "Operation not permitted",
+        helperNeedsFullDiskAccess: true)
+
+    static let blockedByAReadOnlyVolume = AccessDiagnostics.Report(
+        volume: "/Volumes/Install macOS Tahoe",
+        appCanWrite: true,
+        helperDenial: "Read-only file system",
+        helperNeedsFullDiskAccess: false)
 
     static func writing(progress: Double,
                         phase: WritePhase,

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Stage 4 — the drive to erase. The only irreversible choice in the app, so
@@ -7,6 +8,17 @@ struct USBStepView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            // Above the drive list, because both of these say "do not press
+            // Start yet" and arriving underneath the erase confirmation is too
+            // late to be that. Neither is reachable on the Windows path: it
+            // never goes near the privileged helper.
+            if model.preflight.appWasReplaced {
+                AppReplacedWarning()
+            }
+            if let report = model.preflight.usbAccessReport {
+                USBAccessWarning(report: report)
+            }
+
             if model.disks.isEmpty {
                 StatusBanner(.warning,
                              message: "No external drives found. Insert a USB drive "
@@ -18,6 +30,11 @@ struct USBStepView: View {
                         DriveCard(disk: disk, selected: model.diskIndex == index) {
                             model.diskIndex = index
                             model.hasAcknowledgedErase = false
+                            // Asked here rather than at Start, which is the
+                            // whole point: the answer has to arrive while the
+                            // user is still deciding, not once they have
+                            // committed to erasing this drive.
+                            model.checkUSBAccess()
                         }
                     }
                 }
@@ -57,6 +74,55 @@ struct USBStepView: View {
 
             Text("Your internal drive is never listed.")
                 .font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// Shown when the bundle this process launched from has been replaced on disk.
+///
+/// The button is Quit rather than a relaunch. Relaunching means asking the new
+/// bundle to open while this process is still tearing down, and two BootIts
+/// racing for the same daemon is a worse bug than the one being fixed — for a
+/// recovery the user can perform in two seconds.
+struct AppReplacedWarning: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            StatusBanner(.warning,
+                         title: "BootIt was updated while it was open",
+                         message: "This window is still running the previous version, and the two "
+                                + "disagree about how to talk to the background helper. Quit BootIt "
+                                + "and open it again before writing a drive.")
+            Button("Quit BootIt") { NSApplication.shared.terminate(nil) }
+                .buttonStyle(.link)
+                .padding(.leading, 34)
+                .accessibilityIdentifier("quit-after-update")
+        }
+    }
+}
+
+/// Shown when the helper has been asked whether it can write, and said no.
+///
+/// The settings button appears only when the daemon classified its own refusal
+/// as a TCC denial. Every other refusal — a read-only volume, a full disk, an
+/// I/O error — is still a blocked write, but Full Disk Access does nothing about
+/// it, and offering that button anyway is how a user ends up changing an
+/// unrelated setting and still failing.
+struct USBAccessWarning: View {
+    let report: AccessDiagnostics.Report
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            StatusBanner(.warning,
+                         title: "This drive can't be written yet",
+                         message: report.summary)
+            if report.helperNeedsFullDiskAccess {
+                Button("Open Full Disk Access Settings…") {
+                    if let url = HelperError.fullDiskAccessSettingsURL { NSWorkspace.shared.open(url) }
+                }
+                .buttonStyle(.link)
+                .padding(.leading, 34)
+                .accessibilityIdentifier("open-full-disk-access")
+            }
         }
     }
 }
@@ -113,6 +179,23 @@ struct EraseWarning: View {
 
 #Preview("Local ISO — bypass offered here") {
     USBStepView().environmentObject(PreviewModel.drives(selected: 0, source: .local))
+        .padding().frame(width: 560)
+}
+
+#Preview("Updated while open") {
+    USBStepView().environmentObject(PreviewModel.preflightWarning(replaced: true))
+        .padding().frame(width: 560)
+}
+
+#Preview("Blocked — Full Disk Access") {
+    USBStepView().environmentObject(
+        PreviewModel.preflightWarning(access: PreviewModel.blockedByFullDiskAccess))
+        .padding().frame(width: 560)
+}
+
+#Preview("Blocked — but not by Full Disk Access") {
+    USBStepView().environmentObject(
+        PreviewModel.preflightWarning(access: PreviewModel.blockedByAReadOnlyVolume))
         .padding().frame(width: 560)
 }
 
