@@ -50,6 +50,25 @@ jobs:
       - name: Test
         run: swift test
 
+      # Three threading bugs have shipped in the copy-progress subsystem alone: a
+      # cancel dispatched onto the queue it was meant to interrupt, a poller
+      # holding a global-pool thread for forty minutes, and a reducer mutated from
+      # the XPC delivery thread and `worker` at once. The third was found only
+      # because a sanitizer was run by hand — nothing obliged anyone to.
+      #
+      # In the same job rather than its own: a second `runs-on: macos-15` would
+      # bill a whole extra runner at 10x, where this reuses the checked-out tree
+      # and costs one more instrumented build. It is deliberately not
+      # `continue-on-error` — an advisory sanitizer is the same silent-success
+      # shape that let a release publish nothing and report green.
+      #
+      # Verified in both directions on 2026-08-04, not assumed: restoring the
+      # unsynchronised `AppModel.ingest` makes this exit 1 with 8 race warnings,
+      # and the fixed tree exits 0 with none. TSan's own default exit code is
+      # what fails the step, so no TSAN_OPTIONS are set here.
+      - name: Test (ThreadSanitizer)
+        run: swift test --sanitize=thread
+
       - name: SwiftLint (strict)
         run: |
           brew install swiftlint
