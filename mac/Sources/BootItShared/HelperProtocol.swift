@@ -15,7 +15,7 @@ public enum HelperInfo {
     /// Bumped whenever the helper's behaviour changes. The app compares this
     /// against the installed daemon and re-registers on a mismatch, so an app
     /// update can never end up talking to a helper from an older version.
-    public static let version = "6"
+    public static let version = "7"
 
     /// The app's Developer ID team. Both sides pin the other to this.
     public static let teamIdentifier = "MD4M4DL5PP"
@@ -166,4 +166,17 @@ public enum HelperInterface {
 @objc public protocol HelperClientProtocol {
     func helperDidLog(_ line: String)
     func helperDidProgress(_ fraction: Double, status: String)
+
+    /// One measurement of the copy in flight, JSON-encoded `CopySample`.
+    ///
+    /// A separate channel from `helperDidProgress` because it carries a
+    /// different kind of claim. `helperDidProgress` says "the bar is here";
+    /// this says "here is what the device did, decide for yourself". The
+    /// daemon deliberately does no interpretation — it measures and sends, and
+    /// the state machine that turns samples into words lives in the app where
+    /// it can be replayed from a recorded trace instead of from hardware.
+    ///
+    /// Carried as `Data` rather than as a `@objc` parameter list so the sample
+    /// can gain a column without another shipped-pair version mismatch.
+    func helperDidSample(_ payload: Data)
 }

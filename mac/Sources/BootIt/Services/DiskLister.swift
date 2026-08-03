@@ -1,3 +1,4 @@
+import BootItShared
 import Foundation
 
 struct USBDisk: Identifiable, Hashable {

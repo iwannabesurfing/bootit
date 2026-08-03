@@ -1,3 +1,4 @@
+import BootItShared
 import Foundation
 
 enum DownloadError: LocalizedError {

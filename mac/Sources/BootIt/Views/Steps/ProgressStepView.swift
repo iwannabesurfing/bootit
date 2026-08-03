@@ -1,3 +1,4 @@
+import BootItShared
 import SwiftUI
 
 /// Stage 5 — the write itself. A phase checklist carries the narrative; the
@@ -41,15 +42,43 @@ struct ProgressStepView: View {
     /// the other "doing what". A bar alone left the window mostly empty.
     private var runningHeader: some View {
         HStack(alignment: .center, spacing: 26) {
-            ProgressRing(value: model.progress)
+            ProgressRing(value: model.ringValue)
             VStack(alignment: .leading, spacing: 12) {
                 Text(model.statusText)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                livenessLine
                 phaseChecklist
             }
             Spacer(minLength: 0)
+        }
+    }
+
+    /// What the drive is actually doing, in numbers.
+    ///
+    /// This is the part BootIt never had. Three attempts to fix "the bar doesn't
+    /// move" all replaced one guessed percentage with another; none of them
+    /// answered the question the user was really asking, which was whether
+    /// anything was happening at all. Throughput and bytes answer it directly,
+    /// and unlike a percentage they are measured rather than inferred.
+    @ViewBuilder private var livenessLine: some View {
+        if let copy = model.copyState {
+            VStack(alignment: .leading, spacing: 3) {
+                if let detail = copy.detail {
+                    Label {
+                        Text(detail).font(.callout.monospacedDigit())
+                    } icon: {
+                        Image(systemName: model.livenessSymbol)
+                            .foregroundStyle(model.livenessIsWarning ? Color.orange : Theme.accent)
+                    }
+                    .foregroundStyle(model.livenessIsWarning ? Color.primary : Color.secondary)
+                }
+                Text("\(durationHuman(copy.elapsed)) elapsed — \(CopyProgressModel.durationRange)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
         }
     }
 
@@ -190,6 +219,30 @@ struct ProgressStepView: View {
 #Preview("Mid-write, log open") {
     ProgressStepView()
         .environmentObject(PreviewModel.writing(progress: 0.42, phase: .copying, showingLog: true))
+        .padding().frame(width: 560)
+}
+
+#Preview("macOS copy — writing") {
+    ProgressStepView()
+        .environmentObject(PreviewModel.copying(.writing(bytesPerSecond: 8_900_000)))
+        .padding().frame(width: 560)
+}
+
+#Preview("macOS copy — drive gone quiet") {
+    ProgressStepView()
+        .environmentObject(PreviewModel.copying(.idle(seconds: 190)))
+        .padding().frame(width: 560)
+}
+
+#Preview("macOS copy — no measurable signal") {
+    ProgressStepView()
+        .environmentObject(PreviewModel.copying(.unmeasured(reason: .unavailable)))
+        .padding().frame(width: 560)
+}
+
+#Preview("macOS copy — finishing") {
+    ProgressStepView()
+        .environmentObject(PreviewModel.copying(.finishing))
         .padding().frame(width: 560)
 }
 

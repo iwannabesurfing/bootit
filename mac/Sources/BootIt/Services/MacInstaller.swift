@@ -1,4 +1,5 @@
 import AppKit
+import BootItShared
 import Foundation
 
 /// A downloadable macOS full installer, as listed by `softwareupdate`.
@@ -93,15 +94,20 @@ final class MacInstaller {
     private let onLog: (String) -> Void
     /// Coarse stage changes, for the progress checklist. Purely observational.
     private let onPhase: (WritePhase) -> Void
+    /// One measurement of the copy. Separate from `onProgress` because it is a
+    /// different kind of claim — what the device did, not where the bar is.
+    private let onSample: (CopySample) -> Void
 
     init(cancel: CancelFlag,
          onProgress: @escaping (Double, String) -> Void,
          onLog: @escaping (String) -> Void,
-         onPhase: @escaping (WritePhase) -> Void = { _ in }) {
+         onPhase: @escaping (WritePhase) -> Void = { _ in },
+         onSample: @escaping (CopySample) -> Void = { _ in }) {
         self.cancel = cancel
         self.onProgress = onProgress
         self.onLog = onLog
         self.onPhase = onPhase
+        self.onSample = onSample
     }
 
     // MARK: - Catalogue (static, no instance needed)
@@ -258,7 +264,8 @@ final class MacInstaller {
         // progress into the same callbacks the rest of the flow already uses.
         PrivilegedHelper.shared.setHandlers(
             onLog: { [onLog] line in onLog(line) },
-            onProgress: { [onProgress] fraction, status in onProgress(fraction, status) })
+            onProgress: { [onProgress] fraction, status in onProgress(fraction, status) },
+            onSample: { [onSample] sample in onSample(sample) })
         onPhase(.preparing)
         onLog("Checking BootIt's privileged helper…")
         try PrivilegedHelper.shared.ensureReady()
@@ -267,7 +274,11 @@ final class MacInstaller {
         try eraseToMac(disk)
         try check()
         onPhase(.creatingInstaller)
-        onLog("Writing the installer with createinstallmedia (this takes 10–20 minutes)…")
+        // A range, not "10–20 minutes". That line promised 20 against a measured
+        // 38, on a drive that was working correctly the whole time — the same
+        // defect as the bar it sat beside, in words.
+        onLog("Writing the installer with createinstallmedia "
+              + "(\(CopyProgressModel.durationRange))…")
         try runCreateInstallMedia(installerAppPath: installerAppPath)
         onProgress(1.0, "Done")
         onLog("✅  macOS installer USB is ready.")

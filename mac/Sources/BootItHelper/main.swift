@@ -36,6 +36,14 @@ private final class ToolRunner {
         running?.terminate()
     }
 
+    /// The running tool's pid, for `proc_pid_rusage`. Nil between runs.
+    var currentPID: pid_t? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let process = current, process.isRunning else { return nil }
+        return process.processIdentifier
+    }
+
     @discardableResult
     func run(_ launchPath: String, _ args: [String], onLine: @escaping (String) -> Void) -> Int32 {
         let process = Process()
@@ -309,12 +317,16 @@ private final class HelperService: NSObject, HelperProtocol {
         }
 
         // createinstallmedia renames the volume mid-run, so follow the device
-        // rather than the path, and estimate the payload before it starts.
-        let expected = Self.expectedPayloadBytes(installerAppPath: installerAppPath)
-        let stopPolling = Self.startCopyPolling(disk: disk, expected: expected) { [weak self] fraction, status in
-            self?.reportMeasured(fraction, status)
-        }
-        defer { stopPolling() }
+        // rather than the path. One clock for the whole phase: the timer's
+        // samples and the tool's own output have to be stamped against the same
+        // origin or a recorded trace cannot be replayed as one sequence.
+        let clock = CopyClock()
+        let stopSampling = Self.startCopySampling(
+            disk: disk,
+            clock: clock,
+            pid: { [weak self] in self?.runner.currentPID },
+            emit: { [weak self] sample in self?.sample(sample) })
+        defer { stopSampling() }
 
         var tail: [String] = []
         let code = runner.run(tool, ["--volume", volume, "--nointeraction"]) { [weak self] line in
@@ -322,6 +334,11 @@ private final class HelperService: NSObject, HelperProtocol {
             guard !trimmed.isEmpty else { return }
             self?.log(trimmed)
             self?.report(trimmed)
+            // The tool's own words go into the trace on their own sample.
+            // "Making disk bootable" is the only trustworthy signal that the
+            // bulk copy is over, so it has to be replayable alongside the
+            // counters rather than living only in the log.
+            self?.sample(CopySample(elapsed: clock.elapsed(), line: trimmed))
             tail.append(trimmed)
             if tail.count > 40 { tail.removeFirst() }
         }
@@ -363,12 +380,24 @@ private final class HelperService: NSObject, HelperProtocol {
         progress(fraction, InstallMediaProgress.status(for: line))
     }
 
-    /// Progress derived from bytes on the drive rather than from output.
-    /// Shares `lastFraction` with `report` so the two sources cannot fight and
-    /// send the bar backwards.
-    private func reportMeasured(_ fraction: Double, _ status: String) {
-        guard advance(to: fraction) else { return }
-        progress(fraction, status)
+    /// Elapsed time within the copy phase, shared by the sampler and the output
+    /// reader so their samples interleave into one replayable sequence.
+    ///
+    /// A monotonic clock, not a wall clock: `Date` moves when the machine's time
+    /// is corrected, and a 40-minute run is long enough for that to happen.
+    final class CopyClock {
+        private let started = DispatchTime.now()
+        func elapsed() -> Double {
+            Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000_000
+        }
+    }
+
+    /// Send one measurement to the app. Best-effort by design: a dropped sample
+    /// costs one row of a trace and one UI tick, and must never interrupt a
+    /// write that is going fine.
+    private func sample(_ sample: CopySample) {
+        guard let data = try? JSONEncoder().encode(sample) else { return }
+        client?.helperDidSample(data)
     }
 
     // MARK: - Code signing
@@ -393,33 +422,46 @@ private final class HelperService: NSObject, HelperProtocol {
 
     // MARK: - Measured copy progress
     //
-    // The copy phase prints no percentages, so the only honest signal is how
-    // much has actually landed on the drive. Polling the target volume's used
-    // space gives a bar that moves continuously for the fifteen minutes during
-    // which createinstallmedia says nothing at all.
+    // The copy phase prints no percentages, so the daemon measures instead. It
+    // measures and reports; it does not decide. Everything that turns numbers
+    // into words lives in the app, as a pure function of these samples, so that
+    // a wrong answer can be reproduced from a recorded trace in a second rather
+    // than from a forty-minute write against a real drive.
+    //
+    // Three columns, because two of them are here to be disproved:
+    //   • device Bytes (Write) — the signal the UI is driven from.
+    //   • the tool's own rusage — suspected of measuring the buffer cache, which
+    //     would make it race then freeze exactly as the filesystem does.
+    //   • filesystem used bytes — the source of the bar that froze at 95% for 33
+    //     minutes, kept as the control column so a trace can prove it wrong.
 
-    /// Poll the target volume's used space until the returned closure is called.
+    /// Sample the copy every couple of seconds until the returned closure is
+    /// called.
     ///
     /// A timer source rather than a `while` loop around `Thread.sleep`. The loop
     /// held one of the global pool's threads for the entire copy — up to forty
     /// minutes on a slow stick — doing nothing for all but a few microseconds of
     /// it, and could only notice the stop request when its current sleep expired.
     /// The timer occupies no thread between firings and stops on the spot.
-    static func startCopyPolling(disk: String?,
-                                 expected: Int64,
-                                 report: @escaping (Double, String) -> Void) -> () -> Void {
+    static func startCopySampling(disk: String?,
+                                  clock: CopyClock,
+                                  pid: @escaping () -> pid_t?,
+                                  emit: @escaping (CopySample) -> Void) -> () -> Void {
         guard let disk else { return {} }
-        let queue = DispatchQueue(label: "au.media.bootit.helper.copy-poll", qos: .utility)
+        let queue = DispatchQueue(label: "au.media.bootit.helper.copy-sample", qos: .utility)
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        // Fires immediately, as the loop did: the first sample is what replaces
-        // a bar sitting at its starting value while the copy is visibly running.
+        // Fires immediately: the first sample is the baseline every later total
+        // is measured from, and taking it late attributes whatever the drive did
+        // in the meantime to nobody.
         // Leeway because two seconds is a UI cadence, not a deadline — it lets
         // the kernel coalesce this with other wakeups.
         timer.schedule(deadline: .now(), repeating: .seconds(2), leeway: .milliseconds(500))
         timer.setEventHandler {
-            guard let used = volumeUsedBytes(onDisk: disk), used > 0 else { return }
-            report(InstallMediaProgress.copyFraction(used: used, expected: expected),
-                   InstallMediaProgress.copyStatus(used: used, expected: expected))
+            emit(CopySample(elapsed: clock.elapsed(),
+                            deviceBytes: DeviceIOCounters.bytesWritten(onDisk: disk),
+                            processBytes: pid().flatMap { ProcessIOCounters.bytesWritten(pid: $0) },
+                            volumeUsedBytes: volumeUsedBytes(onDisk: disk),
+                            line: nil))
         }
         timer.resume()
         // Captures `timer` strongly on purpose — it is the only thing keeping the
@@ -448,24 +490,13 @@ private final class HelperService: NSObject, HelperProtocol {
         return String(node[range])
     }
 
-    /// Rough size of what createinstallmedia will copy.
-    ///
-    /// SharedSupport.dmg is nearly all of it; the multiplier covers the app
-    /// itself and the RecoveryOS. Measured on macOS Tahoe 26.6: an 18.37 GB dmg
-    /// produced 20.1 GB on the drive, a ratio of 1.09.
-    ///
-    /// Deliberately erring low. Overestimating strands the bar short of the end
-    /// and makes the finish a visible jump; underestimating just parks it on the
-    /// 93% cap for the last few seconds, which reads as "nearly done" rather
-    /// than as a fault.
-    static let payloadOverhead = 1.1
-
-    static func expectedPayloadBytes(installerAppPath: String) -> Int64 {
-        let dmg = installerAppPath + "/Contents/SharedSupport/SharedSupport.dmg"
-        let attributes = try? FileManager.default.attributesOfItem(atPath: dmg)
-        guard let size = attributes?[.size] as? Int64, size > 0 else { return 16_000_000_000 }
-        return Int64(Double(size) * payloadOverhead)
-    }
+    // `expectedPayloadBytes` and its 1.1 overhead constant lived here until
+    // 2026-08-04. They existed to be the denominator of a percentage that is no
+    // longer claimed, and nothing else used them. Kept only in the research
+    // record: the measurements they encoded (an 18.37 GB SharedSupport.dmg
+    // produces 20.1 GB on the drive; the device writes 21.27 GB to put it there)
+    // are the evidence a future denominator would be argued from, and they are
+    // in docs/research and the trace fixture rather than in unreachable code.
 
     // MARK: - Removable-volume access
 

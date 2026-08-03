@@ -23,11 +23,9 @@ public enum InstallMediaProgress {
         return found
     }
 
-    /// Start of the copy phase — everything below this is the erase.
-    public static let copyStart = 0.15
-    /// The copy is not allowed to reach the end on its own; only the tool
-    /// announcing completion does that.
-    public static let copyCeiling = 0.93
+    /// Where the erase ends. Everything above this belongs to the copy, which
+    /// reports liveness rather than a fraction — see `CopyProgressModel`.
+    public static let eraseCeiling = 0.15
 
     /// Where a line of output sits in the 0…1 range.
     ///
@@ -43,38 +41,28 @@ public enum InstallMediaProgress {
     ///     Copying the macOS RecoveryOS...
     ///     Making disk bootable...
     ///
-    /// So output parsing cannot drive the bar through the copy; bytes landing on
-    /// the target volume do that instead. See `copyFraction(used:expected:)`.
+    /// So output parsing cannot drive the bar through the copy, and neither can
+    /// anything else that has been tried: this returns nil for the whole opaque
+    /// stretch, and `CopyProgressModel` reports what the drive is *doing*
+    /// instead of guessing how far through it is.
+    ///
+    /// A `copyFraction(used:expected:)` lived here until 2026-08-04, dividing
+    /// filesystem used-bytes by an estimated payload. It shipped a bar that
+    /// reached 95% in four minutes of a 38-minute write and never moved again,
+    /// because JHFS+ allocates the extents up front. It is deleted rather than
+    /// left unused — the estimate machinery beside it invited exactly the fourth
+    /// substitution the tri-model pass was convened to stop.
     public static func fraction(for line: String) -> Double? {
         if line.contains("Install media now available") { return 1.0 }
-        // Emitted right at the end, after the bulk copy.
+        // Emitted right at the end, after the bulk copy — the one point where a
+        // real end is in sight again and a determinate bar is honest.
         if line.contains("Making disk bootable") { return 0.95 }
         // Older macOS printed "Copying to disk: 50%". macOS 26 prints nothing.
-        // Either way the byte poller owns this phase — routing a copy
+        // Either way this phase has no defensible fraction; routing a copy
         // percentage through the erase mapping below would under-report it.
         if line.contains("Copying") { return nil }
         guard let percent = lastPercent(line) else { return nil }
-        return 0.05 + (Double(percent) / 100) * (copyStart - 0.05)
-    }
-
-    /// Progress through the copy, measured by what has actually landed on the
-    /// drive rather than by what the tool says.
-    ///
-    /// `expected` is an estimate, so this deliberately cannot finish the bar —
-    /// underestimating would otherwise sit at 100% for minutes, which is the
-    /// same "is it stuck?" failure in a different costume.
-    public static func copyFraction(used: Int64, expected: Int64) -> Double {
-        guard expected > 0, used > 0 else { return copyStart }
-        let ratio = min(1.0, Double(used) / Double(expected))
-        return copyStart + ratio * (copyCeiling - copyStart)
-    }
-
-    /// Human-readable position within the copy.
-    public static func copyStatus(used: Int64, expected: Int64) -> String {
-        let gb = Double(used) / 1_000_000_000
-        guard expected > 0 else { return String(format: "Copying macOS to the USB… %.1f GB", gb) }
-        let percent = Int(min(100, Double(used) / Double(expected) * 100))
-        return String(format: "Copying macOS to the USB… %d%%  (%.1f GB)", percent, gb)
+        return 0.05 + (Double(percent) / 100) * (eraseCeiling - 0.05)
     }
 
     /// What to show beside the bar for a line of output.

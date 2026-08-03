@@ -10,6 +10,14 @@ import SwiftUI
 /// button can be the thing the user actually wants next.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// Every run leaves a copy trace in `~/Library/Logs/BootIt/`, so something
+    /// has to clear the old ones out. At launch and off the main thread: a
+    /// folder scan is cheap, but nothing about it needs to happen before the
+    /// window appears.
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        DispatchQueue.global(qos: .utility).async { CopyTraceWriter.pruneOldTraces() }
+    }
 }
 
 struct BootItApp: App {

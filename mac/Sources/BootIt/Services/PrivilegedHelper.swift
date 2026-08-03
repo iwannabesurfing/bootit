@@ -48,9 +48,18 @@ enum HelperError: LocalizedError {
 private final class HelperCallbacks: NSObject, HelperClientProtocol {
     var onLog: (String) -> Void = { _ in }
     var onProgress: (Double, String) -> Void = { _, _ in }
+    var onSample: (CopySample) -> Void = { _ in }
 
     func helperDidLog(_ line: String) { onLog(line) }
     func helperDidProgress(_ fraction: Double, status: String) { onProgress(fraction, status) }
+
+    /// A sample that will not decode is dropped, not guessed at. The only way
+    /// this happens is an app and a daemon from different builds, which is a
+    /// condition to survive quietly rather than to render badly.
+    func helperDidSample(_ payload: Data) {
+        guard let sample = try? JSONDecoder().decode(CopySample.self, from: payload) else { return }
+        onSample(sample)
+    }
 }
 
 /// The app's side of the privileged helper: registers the LaunchDaemon with
@@ -289,24 +298,19 @@ final class PrivilegedHelper {
         return result
     }
 
-    private func currentHelperVersion() throws -> String {
-        let helper = try proxy()
-        var result = ""
-        let done = DispatchSemaphore(value: 0)
-        helper.helperVersion { version in
-            result = version
-            done.signal()
-        }
-        guard done.wait(timeout: .now() + 10) == .success else {
-            throw HelperError.notConnected("the helper did not respond")
-        }
-        return result
-    }
+    // `currentHelperVersion()` lived here until 2026-08-04, with one occurrence
+    // in the codebase — its own definition. It was superseded by the fingerprint
+    // check above, which cannot be forgotten the way a hand-bumped constant can,
+    // and Swift does not warn on an unused private method. `helperVersion` stays
+    // on the XPC protocol: it costs nothing, and it is the one thing that can
+    // still be asked of a daemon too old to know what a fingerprint is.
 
     func setHandlers(onLog: @escaping (String) -> Void,
-                     onProgress: @escaping (Double, String) -> Void) {
+                     onProgress: @escaping (Double, String) -> Void,
+                     onSample: @escaping (CopySample) -> Void = { _ in }) {
         callbacks.onLog = onLog
         callbacks.onProgress = onProgress
+        callbacks.onSample = onSample
     }
 
     func erase(disk: String, volumeName: String) throws {

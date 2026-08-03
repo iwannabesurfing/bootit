@@ -101,7 +101,7 @@ final class InstallMediaProgressTests: XCTestCase {
         XCTAssertEqual(InstallMediaProgress.fraction(for: "Erasing disk: 0%") ?? 0,
                        0.05, accuracy: 0.001)
         XCTAssertEqual(InstallMediaProgress.fraction(for: "Erasing disk: 0%... 100%") ?? 0,
-                       InstallMediaProgress.copyStart, accuracy: 0.001)
+                       InstallMediaProgress.eraseCeiling, accuracy: 0.001)
     }
 
     func testRealTahoeTranscriptNeverGoesBackwards() {
@@ -212,71 +212,14 @@ final class MeasuredCopyProgressTests: XCTestCase {
         XCTAssertEqual(InstallMediaProgress.fraction(for: "Erasing disk: 0%") ?? 0,
                        0.05, accuracy: 0.001)
         XCTAssertEqual(InstallMediaProgress.fraction(for: "Erasing disk: 0%... 100%") ?? 0,
-                       InstallMediaProgress.copyStart, accuracy: 0.001)
+                       InstallMediaProgress.eraseCeiling, accuracy: 0.001)
     }
 
-    func testCopyFractionSpansTheBulkOfTheBar() {
-        let start = InstallMediaProgress.copyFraction(used: 1, expected: 20_000_000_000)
-        let half = InstallMediaProgress.copyFraction(used: 10_000_000_000, expected: 20_000_000_000)
-        let full = InstallMediaProgress.copyFraction(used: 20_000_000_000, expected: 20_000_000_000)
 
-        XCTAssertEqual(start, InstallMediaProgress.copyStart, accuracy: 0.01)
-        XCTAssertEqual(full, InstallMediaProgress.copyCeiling, accuracy: 0.001)
-        XCTAssertTrue(half > start && half < full)
-    }
 
-    func testAnUnderestimateCannotFinishTheBarEarly() {
-        // `expected` is an estimate. If the payload runs over, the bar must stop
-        // short and wait for the completion line rather than sit at 100%.
-        let over = InstallMediaProgress.copyFraction(used: 40_000_000_000, expected: 20_000_000_000)
-        XCTAssertEqual(over, InstallMediaProgress.copyCeiling, accuracy: 0.001)
-        XCTAssertLessThan(over, 1.0)
-        XCTAssertEqual(InstallMediaProgress.fraction(for: "Install media now available"), 1.0)
-    }
 
-    func testZeroExpectedDoesNotDivideByZero() {
-        XCTAssertEqual(InstallMediaProgress.copyFraction(used: 5, expected: 0),
-                       InstallMediaProgress.copyStart, accuracy: 0.001)
-    }
-
-    func testCopyStatusShowsPercentAndGigabytes() {
-        let status = InstallMediaProgress.copyStatus(used: 10_000_000_000, expected: 20_000_000_000)
-        XCTAssertTrue(status.contains("50%"), status)
-        XCTAssertTrue(status.contains("10.0 GB"), status)
-    }
 }
 
-/// Sanity on the payload estimate, against numbers measured from a real
-/// macOS Tahoe 26.6 run: an 18.37 GB SharedSupport.dmg produced 20.1 GB on the
-/// drive. Wrong in the safe direction is fine; wrong in the other direction
-/// leaves a visible jump at the finish.
-final class PayloadEstimateTests: XCTestCase {
-
-    private let measuredDMG: Int64 = 18_370_000_000
-    private let measuredOnDisk: Int64 = 20_100_000_000
-
-    func testEstimateLandsCloseToTheMeasuredPayload() {
-        let estimate = Int64(Double(measuredDMG) * 1.1)
-        let error = abs(Double(estimate - measuredOnDisk)) / Double(measuredOnDisk)
-        XCTAssertLessThan(error, 0.05, "estimate should be within 5% of what actually lands")
-    }
-
-    func testTheFinishIsNotAVisibleJump() {
-        // An estimate that is too high strands the ring well short of the cap
-        // and the completion line then leaps it to 100%.
-        let estimate = Int64(Double(measuredDMG) * 1.1)
-        let atFinish = InstallMediaProgress.copyFraction(used: measuredOnDisk, expected: estimate)
-        XCTAssertGreaterThan(atFinish, 0.90, "should be near the cap when the copy really ends")
-        XCTAssertLessThanOrEqual(atFinish, InstallMediaProgress.copyCeiling)
-    }
-
-    func testTheOldMultiplierWouldHaveStrandedIt() {
-        // Documents why 1.2 was wrong: it left a 14-point jump at the end.
-        let old = Int64(Double(measuredDMG) * 1.2)
-        let atFinish = InstallMediaProgress.copyFraction(used: measuredOnDisk, expected: old)
-        XCTAssertLessThan(atFinish, 0.88)
-    }
-}
 
 /// The daemon validated `disk` exhaustively and `volumeName` not at all, while
 /// `volumeName` was interpolated into "/Volumes/<name>" and handed to a root

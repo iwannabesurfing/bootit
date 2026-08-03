@@ -1,3 +1,4 @@
+import BootItShared
 import XCTest
 @testable import BootIt
 

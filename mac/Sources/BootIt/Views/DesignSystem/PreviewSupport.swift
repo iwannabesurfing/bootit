@@ -1,4 +1,5 @@
 #if DEBUG
+import BootItShared
 import Foundation
 
 /// Deterministic models for SwiftUI previews.
@@ -80,6 +81,26 @@ enum PreviewModel {
         model.statusText = "Copying installer files — 29.6 GB of 71.3 GB"
         model.showsLogDetails = showingLog
         model.logText = sampleLog
+        return model
+    }
+
+    /// The opaque macOS copy — the 33 minutes that had nothing honest to show.
+    ///
+    /// The wording comes from the model's own `status`/`detail`, not from
+    /// strings typed here, so a preview cannot show copy the app would never
+    /// produce. Byte and elapsed figures are the 2026-08-03 run at its midpoint.
+    static func copying(_ activity: CopyActivity) -> AppModel {
+        let model = writing(progress: InstallMediaProgress.eraseCeiling, phase: .creatingInstaller)
+        model.platform = .macos
+        let state = CopyProgressState(
+            activity: activity,
+            bytesWritten: 12_400_000_000,
+            elapsed: 1_390,
+            fraction: nil,
+            status: CopyProgressModel.status(for: activity),
+            detail: CopyProgressModel.detail(for: activity, bytesWritten: 12_400_000_000))
+        model.copyState = state
+        model.statusText = state.status
         return model
     }
 

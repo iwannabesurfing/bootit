@@ -1,3 +1,4 @@
+import BootItShared
 import Foundation
 import SwiftUI
 
@@ -85,6 +86,14 @@ final class AppModel: ObservableObject {
     // Progress
     @Published var progress: Double = 0
     @Published var statusText = "Starting…"
+
+    /// What the opaque copy phase is doing, when one is running.
+    ///
+    /// Non-nil only during `createinstallmedia`'s silent stretch, which is where
+    /// the ring has nothing defensible to show as a percentage and shows
+    /// liveness instead. Nil everywhere else, so every other phase keeps the
+    /// determinate bar it has genuinely earned.
+    @Published var copyState: CopyProgressState?
     @Published var logText = ""
     @Published var runError: String?
     /// True when the run stopped because the user asked it to. Distinct from
@@ -190,6 +199,56 @@ final class AppModel: ObservableObject {
     private func log(_ s: String) { onMain { self.logText += s + "\n" } }
     private func setProgress(_ p: Double, _ status: String) {
         onMain { self.progress = min(max(p, 0), 1); self.statusText = status }
+    }
+
+    /// The copy state machine. Lives here, fed by the daemon's measurements, and
+    /// is a pure function of them — `CopyProgressModelTests` drives the identical
+    /// code from a recorded trace, so the screen can be falsified without a
+    /// forty-minute write.
+    private var copyModel = CopyProgressModel()
+
+    private func ingest(_ sample: CopySample) {
+        let state = copyModel.ingest(sample)
+        onMain {
+            self.copyState = state
+            self.statusText = state.status
+        }
+    }
+
+    /// Called when the copy phase ends, so a finished or failed run does not
+    /// leave a liveness line describing a drive nothing is writing to.
+    private func endCopyReporting() {
+        copyModel = CopyProgressModel()
+        onMain { self.copyState = nil }
+    }
+
+    // MARK: - What the ring shows
+
+    /// The ring's value, or nil for an indeterminate one.
+    ///
+    /// A copy in flight has no defensible percentage, so it gets no number. Once
+    /// the tool announces the bless step there is a real end in sight again and
+    /// the determinate bar returns for the last stretch.
+    var ringValue: Double? {
+        guard let copy = copyState else { return progress }
+        if case .finishing = copy.activity { return progress }
+        return copy.fraction
+    }
+
+    var livenessSymbol: String {
+        switch copyState?.activity {
+        case .idle:        return "exclamationmark.triangle.fill"
+        case .unmeasured:  return "questionmark.circle.fill"
+        default:           return "arrow.down.circle.fill"
+        }
+    }
+
+    /// Only a genuinely quiet drive is drawn as a warning. "Can't be measured"
+    /// is a limitation of the drive, not a fault in the run, and colouring it
+    /// like one would send people hunting for a problem that is not there.
+    var livenessIsWarning: Bool {
+        if case .idle = copyState?.activity { return true }
+        return false
     }
     private func message(_ error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -323,6 +382,7 @@ final class AppModel: ObservableObject {
         progress = 0
         logText = ""
         statusText = "Starting…"
+        copyState = nil
         running = true
         currentPhase = nil
         showsLogDetails = false
@@ -364,7 +424,7 @@ final class AppModel: ObservableObject {
         hasAcknowledgedErase = false
         isConfirmingErase = false
         progress = 0; logText = ""; runError = nil; wasCancelled = false
-        running = false; statusText = "Starting…"
+        running = false; statusText = "Starting…"; copyState = nil
         currentPhase = nil; showsLogDetails = false; showsAdvancedWindowsOptions = false
         editions = []; languages = []; macInstallers = []
         selectedMacGroupTitle = ""; selectedMacBuild = ""; showOlderMacBuilds = false
@@ -373,6 +433,10 @@ final class AppModel: ObservableObject {
     }
 
     private func runPipeline(_ request: BuildRequest) {
+        // However this ends — done, failed, cancelled — the copy is over, and a
+        // liveness line left on screen would be describing a drive that nothing
+        // is writing to.
+        defer { endCopyReporting() }
         do {
             switch request.platform {
             case .windows: try runWindows(request)
@@ -474,11 +538,17 @@ final class AppModel: ObservableObject {
         }
         try check()
         let span = 1.0 - writeBase
+        let trace = CopyTraceWriter(stamp: CopyTraceWriter.stamp())
+        defer { trace.close() }
         try MacInstaller(
             cancel: cancelFlag,
             onProgress: { frac, status in self.setProgress(writeBase + frac * span, status) },
             onLog: { self.log($0) },
-            onPhase: { self.setPhase($0) }).write(installerAppPath: installerApp, disk: request.disk)
+            onPhase: { self.setPhase($0) },
+            onSample: { sample in
+                trace.append(sample)
+                self.ingest(sample)
+            }).write(installerAppPath: installerApp, disk: request.disk)
     }
 
     private func check() throws {
