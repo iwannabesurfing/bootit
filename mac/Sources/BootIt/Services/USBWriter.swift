@@ -1,3 +1,4 @@
+import BootItShared
 import Foundation
 
 enum WriterError: LocalizedError {
@@ -191,31 +192,25 @@ final class USBWriter {
     private func erase() throws {
         onLog("Erasing \(disk) → FAT32 / MBR…")
         onProgress(0.08, "Erasing USB…")
-        Shell.run(Self.diskutil, ["unmountDisk", "force", disk])
-        // MBR — NOT GPT. A GPT format makes macOS add a small empty EFI System
-        // Partition alongside the data partition. Windows Setup detects that ESP
-        // and writes the boot loader (bootmgfw + BCD) onto the USB instead of the
-        // target SSD — so pulling the USB after install leaves the SSD unbootable
-        // ("No OS found"). MBR yields a single FAT32 partition with no ESP for
-        // Setup to hijack, and is still UEFI-bootable for removable install media
-        // via the \EFI\BOOT\BOOTX64.EFI fallback path.
-        let erase = Shell.run(Self.diskutil, ["eraseDisk", "MS-DOS", Self.volName, "MBR", disk])
-        if !erase.ok {
-            // Same failure mode as the macOS path: `eraseDisk` reuses the existing
-            // partition scheme and fails with -69850 on a drive that already holds
-            // a bootable layout. `partitionDisk` replaces the scheme, keeping MBR
-            // for the reason above.
-            onLog("Erase failed; rewriting the partition scheme and retrying…")
-            Shell.run(Self.diskutil, ["unmountDisk", "force", disk])
-            let repartition = Shell.run(
-                Self.diskutil, ["partitionDisk", disk, "MBR", "MS-DOS", Self.volName, "100%"])
-            guard repartition.ok else {
-                let detail = [erase.err.isEmpty ? erase.out : erase.err,
-                              repartition.err.isEmpty ? repartition.out : repartition.err]
-                    .filter { !$0.isEmpty }.joined(separator: "\n")
-                throw WriterError.eraseFailed(detail)
-            }
+
+        // MBR rather than GPT, and the reason it matters, live on
+        // `EraseFormat.windowsInstaller` — as does the retry, which the macOS
+        // path in the daemon needs identically.
+        let outcome = DiskErase.perform(
+            device: disk,
+            volumeName: Self.volName,
+            format: .windowsInstaller,
+            onRetry: { self.onLog("Erase failed; rewriting the partition scheme and retrying…") },
+            run: { arguments in
+                let result = Shell.run(Self.diskutil, arguments)
+                return DiskErase.StepResult(ok: result.ok,
+                                            output: result.err.isEmpty ? result.out : result.err)
+            })
+
+        if case .failed(let detail) = outcome {
+            throw WriterError.eraseFailed(detail)
         }
+
         let mount = try findUSBMount()
         usbMount = mount
         onLog("Formatted. USB mounted at \(mount)")

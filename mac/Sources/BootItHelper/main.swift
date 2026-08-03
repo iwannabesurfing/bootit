@@ -223,32 +223,20 @@ private final class HelperService: NSObject, HelperProtocol {
         log("Erasing \(device) → Mac OS Extended (Journaled) / GPT…")
         progress(0.02, "Erasing USB…")
 
-        runner.run(Self.diskutil, ["unmountDisk", "force", device]) { _ in }
+        let outcome = DiskErase.perform(
+            device: device,
+            volumeName: volumeName,
+            format: .macOSInstaller,
+            onRetry: { self.log("Erase failed; rewriting the partition scheme and retrying…") },
+            run: { arguments in
+                var output = ""
+                let code = self.runner.run(Self.diskutil, arguments) { output += $0 + "\n" }
+                return DiskErase.StepResult(ok: code == 0, output: output)
+            })
 
-        var out = ""
-        var code = runner.run(Self.diskutil,
-                              ["eraseDisk", "JHFS+", volumeName, "GPT", device]) { line in
-            out += line + "\n"
-        }
-
-        if code != 0 {
-            // `eraseDisk` reuses the existing partition scheme, which fails with
-            // -69850 on a drive already carrying a bootable or cloned layout —
-            // including one BootIt itself wrote earlier. `partitionDisk` replaces
-            // the scheme outright, which is the case a plain retry cannot reach.
-            log("Erase failed; rewriting the partition scheme and retrying…")
-            runner.run(Self.diskutil, ["unmountDisk", "force", device]) { _ in }
-            var retry = ""
-            code = runner.run(Self.diskutil,
-                              ["partitionDisk", device, "GPT", "JHFS+", volumeName, "100%"]) { line in
-                retry += line + "\n"
-            }
-            if code != 0 {
-                reply(HelperInfo.failure(
-                    .operationFailed,
-                    [out, retry].filter { !$0.isEmpty }.joined(separator: "\n")))
-                return
-            }
+        if case .failed(let detail) = outcome {
+            reply(HelperInfo.failure(.operationFailed, detail))
+            return
         }
 
         log("Formatted.")
