@@ -86,7 +86,14 @@ final class CopyTraceWriter {
             fm.createFile(atPath: url.path, contents: nil)
         }
         guard let handle = try? FileHandle(forWritingTo: url) else { return nil }
-        try? handle.seekToEnd()
+        // The offset is deliberately discarded, not merely unused. `seekToEnd`
+        // only matters in the branch above where the file already existed — a
+        // same-second stamp collision — and it can only throw on a handle that
+        // is not seekable, which here means someone replaced the trace with a
+        // FIFO. That is the same same-user-only ceiling recorded on `directory`,
+        // so this stays best-effort rather than growing a branch no test can
+        // reach. A fresh file is already at its end.
+        _ = try? handle.seekToEnd()
         return handle
     }
 
