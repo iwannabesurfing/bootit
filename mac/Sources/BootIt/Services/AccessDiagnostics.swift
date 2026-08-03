@@ -58,9 +58,20 @@ enum AccessDiagnostics {
                      + "access to files on a removable volume, or enable BootIt under "
                      + "System Settings → Privacy & Security → Files and Folders."
             case (_, .some(false)):
-                return "BootIt can write to \(volume) but its helper cannot. macOS never asks a "
-                     + "background helper for this, so add BootIt under System Settings → "
-                     + "Privacy & Security → Full Disk Access, then click Install or Repair."
+                // The daemon's own sentence, not just our guess at what it meant.
+                //
+                // `writeDenialReason` reports EPERM/EACCES as needsFullDiskAccess
+                // and everything else — a read-only volume, a full disk, an I/O
+                // error — as operationFailed with the strerror text. Both used to
+                // render as the identical "go and add Full Disk Access", which is
+                // the right advice for exactly one of them and sends the user to
+                // change an unrelated setting for the rest.
+                let reason = helperDenial.flatMap { $0.isEmpty ? nil : $0 }
+                return "BootIt can write to \(volume) but its helper cannot."
+                     + (reason.map { " \($0)" } ?? "")
+                     + "\n\nmacOS never asks a background helper for removable-drive access, so "
+                     + "add BootIt under System Settings → Privacy & Security → Full Disk "
+                     + "Access, then click Install or Repair."
             default:
                 // `helperError` used to be computed here and thrown away, so the
                 // one sentence saying *what went wrong* never reached the screen.

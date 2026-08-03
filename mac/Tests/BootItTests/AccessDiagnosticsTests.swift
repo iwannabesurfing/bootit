@@ -41,6 +41,27 @@ final class AccessDiagnosticsReportTests: XCTestCase {
         XCTAssertTrue(denied.summary.contains("Full Disk Access"))
     }
 
+    /// The daemon separates a TCC denial from every other reason a write can
+    /// fail, and only the first one is fixed by Full Disk Access. Both used to
+    /// print the same sentence, so the screen could not tell them apart — which
+    /// is also why a verification run could not confirm which code had crossed.
+    func testTheHelpersOwnDenialReachesTheScreen() {
+        let tcc = report(volume: volume, appCanWrite: true,
+                         helperDenial: "macOS is blocking BootIt's helper from writing to removable drives.")
+        XCTAssertTrue(tcc.summary.contains("blocking BootIt's helper"), tcc.summary)
+
+        let other = report(volume: volume, appCanWrite: true,
+                           helperDenial: "Couldn't write to \(volume): Read-only file system.")
+        XCTAssertTrue(other.summary.contains("Read-only file system"), other.summary)
+    }
+
+    func testAnEmptyDenialStillReadsAsASentence() {
+        let blank = report(volume: volume, appCanWrite: true, helperDenial: "")
+        XCTAssertEqual(blank.outcome, .blocked)
+        XCTAssertFalse(blank.summary.contains("cannot. \n"), blank.summary)
+        XCTAssertTrue(blank.summary.contains("Full Disk Access"))
+    }
+
     func testTheAppItselfBeingRefusedIsAlsoBlocked() {
         let denied = report(volume: volume, appCanWrite: false)
         XCTAssertEqual(denied.outcome, .blocked)
