@@ -58,15 +58,58 @@ public enum HelperInfo {
         and certificate leaf[subject.OU] = "\(teamIdentifier)"
         """
 
-    /// Marks the one failure the user can actually fix themselves.
+    /// Domain for every failure the daemon reports.
+    public static let errorDomain = "au.media.bootit.helper"
+
+    /// Build the daemon's reply for a failure.
+    public static func failure(_ reason: HelperFailure, _ message: String) -> NSError {
+        NSError(domain: errorDomain,
+                code: reason.rawValue,
+                userInfo: [NSLocalizedDescriptionKey: message])
+    }
+}
+
+/// Why a privileged operation failed.
+///
+/// This used to be a magic prefix on the message string — the app matched
+/// `"NEEDS_FULL_DISK_ACCESS: "` and sliced it back off. Three reviewers flagged
+/// it independently, and they were right: a contract carried in the first 24
+/// characters of a human-readable sentence breaks the moment anyone rewords the
+/// sentence, and nothing in the type system says so.
+///
+/// `@objc` cannot carry a Swift enum over XPC, but `NSError` round-trips
+/// natively, so the distinction the app must *act* on travels as a code while
+/// the text stays free to change.
+@objc public enum HelperFailure: Int {
+    /// Something went wrong doing the work itself.
+    case operationFailed = 1
+    /// A guard rejected the request before any work started.
+    case refused = 2
+    /// The one failure the user can actually fix themselves.
     ///
     /// `createinstallmedia` writes a `.IAPhysicalMedia` cookie to the root of
     /// the target volume, and TCC gates writes to removable volumes. A daemon
     /// has no GUI session, so it is never *prompted* for that access — it is
     /// silently denied with EPERM, which surfaces as an opaque "Operation not
-    /// permitted" a long way from its cause. The app matches on this prefix to
-    /// show the one instruction that resolves it.
-    public static let needsFullDiskAccessPrefix = "NEEDS_FULL_DISK_ACCESS: "
+    /// permitted" a long way from its cause.
+    case needsFullDiskAccess = 3
+    /// Another operation already holds this disk.
+    case busy = 4
+}
+
+/// Builds the XPC interface both sides use.
+///
+/// No explicit class whitelisting: measured, not assumed — a reply parameter
+/// typed `NSError?` already gets `NSError` in its allowed set, inferred from the
+/// signature, so calling `setClasses` for it is a no-op dressed as a safeguard.
+///
+/// The constraint that *is* real: an `NSError`'s `userInfo` values must
+/// themselves be allowed classes. `HelperInfo.failure` only ever puts a string
+/// in there. Anything richer would need whitelisting here.
+public enum HelperInterface {
+    public static func make() -> NSXPCInterface {
+        NSXPCInterface(with: HelperProtocol.self)
+    }
 }
 
 /// What the privileged daemon will do on the app's behalf.
@@ -91,18 +134,20 @@ public enum HelperInfo {
 
     /// Erase `disk` (a BSD name such as "disk4") to JHFS+/GPT named `volumeName`.
     ///
-    /// - reply: `nil` on success, otherwise a human-readable failure.
+    /// - reply: `nil` on success, otherwise an error in `HelperInfo.errorDomain`
+    ///   whose code is a `HelperFailure`.
     func eraseDisk(_ disk: String,
                    volumeName: String,
-                   reply: @escaping (String?) -> Void)
+                   reply: @escaping (NSError?) -> Void)
 
     /// Run Apple's `createinstallmedia` from `installerAppPath` onto the volume
     /// named `volumeName`, streaming its output back to the client as it goes.
     ///
-    /// - reply: `nil` on success, otherwise a human-readable failure.
+    /// - reply: `nil` on success, otherwise an error in `HelperInfo.errorDomain`
+    ///   whose code is a `HelperFailure`.
     func createInstallMedia(installerAppPath: String,
                             volumeName: String,
-                            reply: @escaping (String?) -> Void)
+                            reply: @escaping (NSError?) -> Void)
 
     /// Abandon the running operation, if any.
     func cancelCurrentOperation(reply: @escaping (Bool) -> Void)
@@ -112,7 +157,9 @@ public enum HelperInfo {
     /// Exists so the app can show the user which side of the divide is blocked —
     /// itself or the daemon — instead of both failing with the same opaque
     /// "Operation not permitted" and leaving the cause to guesswork.
-    func probeWrite(volumePath: String, reply: @escaping (String?) -> Void)
+    ///
+    /// - reply: `nil` if the daemon can write there, otherwise the reason.
+    func probeWrite(volumePath: String, reply: @escaping (NSError?) -> Void)
 }
 
 /// Callbacks the helper makes back into the app while work is in flight.

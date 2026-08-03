@@ -95,11 +95,11 @@ enum AccessDiagnostics {
             // which reads as "the helper is broken" rather than "the helper is
             // stale". ensureReady() is what notices the version gap.
             try PrivilegedHelper.shared.ensureReady()
-            denial = try PrivilegedHelper.shared.probeWrite(volumePath: volume)
-            // Strip the marker the daemon uses to flag this to the UI.
-            if let text = denial, text.hasPrefix(HelperInfo.needsFullDiskAccessPrefix) {
-                denial = String(text.dropFirst(HelperInfo.needsFullDiskAccessPrefix.count))
-            }
+            // The reason arrives as an NSError carrying a HelperFailure code, so
+            // there is no marker to strip any more — the message is just the
+            // message, and the classification travels beside it.
+            denial = try PrivilegedHelper.shared.probeWrite(volumePath: volume)?
+                .localizedDescription
         } catch {
             failure = error.localizedDescription
         }

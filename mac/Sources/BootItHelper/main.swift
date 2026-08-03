@@ -170,37 +170,37 @@ private final class HelperService: NSObject, HelperProtocol {
         reply(true)
     }
 
-    func probeWrite(volumePath: String, reply: @escaping (String?) -> Void) {
+    func probeWrite(volumePath: String, reply: @escaping (NSError?) -> Void) {
         // Scoped so this cannot be used as an as-root "can I write here?" oracle
         // against arbitrary directories. It exists to test USB drives.
         guard DiskGuard.isVolumeRootPath(volumePath) else {
-            reply("Refusing to probe a path outside /Volumes.")
+            reply(HelperInfo.failure(.refused, "Refusing to probe a path outside /Volumes."))
             return
         }
         reply(Self.writeDenialReason(at: volumePath))
     }
 
-    func eraseDisk(_ disk: String, volumeName: String, reply: @escaping (String?) -> Void) {
+    func eraseDisk(_ disk: String, volumeName: String, reply: @escaping (NSError?) -> Void) {
         // Only ever touch a whole external disk. A caller that has somehow got
         // past the signature check still cannot aim this at "disk1s2" or a path.
         guard DiskGuard.isWholeDiskName(disk) else {
-            reply("Refusing to erase \"\(disk)\" — not a whole-disk BSD name.")
+            reply(HelperInfo.failure(.refused, "Refusing to erase \"\(disk)\" — not a whole-disk BSD name."))
             return
         }
         // `volumeName` becomes an argument to diskutil and, later, the path
         // "/Volumes/<name>" that a root process is pointed at. It needs the same
         // scrutiny `disk` gets; it previously had none.
         guard DiskGuard.isSafeVolumeName(volumeName) else {
-            reply("Refusing to use \"\(volumeName)\" as a volume name.")
+            reply(HelperInfo.failure(.refused, "Refusing to use \"\(volumeName)\" as a volume name."))
             return
         }
         guard Self.isExternalDisk(disk) else {
-            reply("Refusing to erase \(disk) — it is not an external disk.")
+            reply(HelperInfo.failure(.refused, "Refusing to erase \(disk) — it is not an external disk."))
             return
         }
         // Never let two callers erase the same drive at once.
         guard ActiveWork.claim(disk) else {
-            reply("Another operation is already running on \(disk).")
+            reply(HelperInfo.failure(.busy, "Another operation is already running on \(disk)."))
             return
         }
         // Off the XPC invocation thread: doing the work inline blocks this
@@ -212,7 +212,7 @@ private final class HelperService: NSObject, HelperProtocol {
         }
     }
 
-    private func performErase(_ disk: String, volumeName: String, reply: @escaping (String?) -> Void) {
+    private func performErase(_ disk: String, volumeName: String, reply: @escaping (NSError?) -> Void) {
 
         // Prove we can write to this drive BEFORE destroying what is on it.
         //
@@ -252,7 +252,9 @@ private final class HelperService: NSObject, HelperProtocol {
                 retry += line + "\n"
             }
             if code != 0 {
-                reply([out, retry].filter { !$0.isEmpty }.joined(separator: "\n"))
+                reply(HelperInfo.failure(
+                    .operationFailed,
+                    [out, retry].filter { !$0.isEmpty }.joined(separator: "\n")))
                 return
             }
         }
@@ -264,14 +266,14 @@ private final class HelperService: NSObject, HelperProtocol {
 
     func createInstallMedia(installerAppPath: String,
                             volumeName: String,
-                            reply: @escaping (String?) -> Void) {
+                            reply: @escaping (NSError?) -> Void) {
         guard let disk = Self.wholeDisk(hosting: "/Volumes/\(volumeName)"),
               DiskGuard.isSafeVolumeName(volumeName) else {
-            reply("Refusing to write to a volume named \"\(volumeName)\".")
+            reply(HelperInfo.failure(.refused, "Refusing to write to a volume named \"\(volumeName)\"."))
             return
         }
         guard ActiveWork.claim(disk) else {
-            reply("Another operation is already running on \(disk).")
+            reply(HelperInfo.failure(.busy, "Another operation is already running on \(disk)."))
             return
         }
         Self.workQueue.async {
@@ -286,22 +288,22 @@ private final class HelperService: NSObject, HelperProtocol {
     private func performCreateInstallMedia(installerAppPath: String,
                                            volumeName: String,
                                            disk: String,
-                                           reply: @escaping (String?) -> Void) {
+                                           reply: @escaping (NSError?) -> Void) {
 
         guard DiskGuard.isSafeVolumeName(volumeName) else {
-            reply("Refusing to write to a volume named \"\(volumeName)\".")
+            reply(HelperInfo.failure(.refused, "Refusing to write to a volume named \"\(volumeName)\"."))
             return
         }
         // `/Applications` only, resolved first, so a symlink or `..` cannot aim
         // this somewhere the user does not control — /tmp, say.
         let appPath = (installerAppPath as NSString).standardizingPath
         guard appPath.hasPrefix("/Applications/"), !appPath.contains("..") else {
-            reply("Refusing to run an installer from outside /Applications.")
+            reply(HelperInfo.failure(.refused, "Refusing to run an installer from outside /Applications."))
             return
         }
         let tool = appPath + "/Contents/Resources/createinstallmedia"
         guard FileManager.default.isExecutableFile(atPath: tool) else {
-            reply("This installer is missing its createinstallmedia tool — it may be incomplete.")
+            reply(HelperInfo.failure(.refused, "This installer is missing its createinstallmedia tool — it may be incomplete."))
             return
         }
         // The single most dangerous line in this daemon is the one that execs
@@ -310,12 +312,12 @@ private final class HelperService: NSObject, HelperProtocol {
         // and the helper holds Full Disk Access, so a forged binary here would
         // run as root with standing access to every user's files.
         guard Self.isSignedByApple(tool) else {
-            reply("That createinstallmedia is not signed by Apple — refusing to run it.")
+            reply(HelperInfo.failure(.refused, "That createinstallmedia is not signed by Apple — refusing to run it."))
             return
         }
         let volume = "/Volumes/\(volumeName)"
         guard FileManager.default.fileExists(atPath: volume) else {
-            reply("The formatted volume \(volume) is not mounted.")
+            reply(HelperInfo.failure(.refused, "The formatted volume \(volume) is not mounted."))
             return
         }
         // Second gate, for the case where the drive held no mounted volume
@@ -345,7 +347,9 @@ private final class HelperService: NSObject, HelperProtocol {
         }
 
         guard code == 0 else {
-            reply("createinstallmedia exited \(code).\n" + tail.suffix(12).joined(separator: "\n"))
+            reply(HelperInfo.failure(.operationFailed,
+                                     "createinstallmedia exited \(code).\n"
+                                     + tail.suffix(12).joined(separator: "\n")))
             return
         }
         progress(1.0, "Install media ready")
@@ -503,7 +507,7 @@ private final class HelperService: NSObject, HelperProtocol {
     /// This performs the exact syscall createinstallmedia dies on — creating a
     /// temporary file in the volume root — rather than inferring from TCC state,
     /// which is not readable from here anyway.
-    static func writeDenialReason(at path: String) -> String? {
+    static func writeDenialReason(at path: String) -> NSError? {
         let probe = (path as NSString).appendingPathComponent(".bootit-write-probe")
         let fd = open(probe, O_CREAT | O_EXCL | O_WRONLY, 0o600)
         if fd >= 0 {
@@ -517,10 +521,13 @@ private final class HelperService: NSObject, HelperProtocol {
             return nil
         }
         guard err == EPERM || err == EACCES else {
-            return "Couldn't write to \(path): \(String(cString: strerror(err)))."
+            return HelperInfo.failure(
+                .operationFailed,
+                "Couldn't write to \(path): \(String(cString: strerror(err))).")
         }
-        return HelperInfo.needsFullDiskAccessPrefix
-             + "macOS is blocking BootIt's helper from writing to removable drives."
+        return HelperInfo.failure(
+            .needsFullDiskAccess,
+            "macOS is blocking BootIt's helper from writing to removable drives.")
     }
 
     // MARK: - Guards
@@ -613,7 +620,7 @@ private final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
         }
 
         let service = HelperService()
-        connection.exportedInterface = NSXPCInterface(with: HelperProtocol.self)
+        connection.exportedInterface = HelperInterface.make()
         connection.exportedObject = service
         connection.remoteObjectInterface = NSXPCInterface(with: HelperClientProtocol.self)
         service.connection = connection

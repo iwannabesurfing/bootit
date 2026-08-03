@@ -161,7 +161,7 @@ final class PrivilegedHelper {
         if connection == nil {
             let conn = NSXPCConnection(machServiceName: HelperInfo.machServiceName,
                                        options: .privileged)
-            conn.remoteObjectInterface = NSXPCInterface(with: HelperProtocol.self)
+            conn.remoteObjectInterface = HelperInterface.make()
             conn.exportedInterface = NSXPCInterface(with: HelperClientProtocol.self)
             conn.exportedObject = callbacks
 
@@ -303,9 +303,9 @@ final class PrivilegedHelper {
 
     /// Ask the daemon whether it can write to `volumePath`. Returns the denial
     /// reason, or nil if it can.
-    func probeWrite(volumePath: String) throws -> String? {
+    func probeWrite(volumePath: String) throws -> NSError? {
         let helper = try proxy()
-        var result: String?
+        var result: NSError?
         let done = DispatchSemaphore(value: 0)
         helper.probeWrite(volumePath: volumePath) { reason in
             result = reason
@@ -324,14 +324,34 @@ final class PrivilegedHelper {
         _ = done.wait(timeout: .now() + 5)
     }
 
+    /// Turn the daemon's reply into the app's own error type.
+    ///
+    /// The one distinction the app has to *act* on is Full Disk Access, because
+    /// it is the only failure with a fix the user can perform — so it gets a
+    /// button to the right settings pane. Everything else is shown verbatim
+    /// rather than guessed at. An error from outside the daemon's own domain is
+    /// passed through untouched: it came from XPC itself, and rewording it would
+    /// only hide where it came from.
+    static func decode(_ error: NSError) -> Error {
+        guard error.domain == HelperInfo.errorDomain else {
+            return HelperError.operationFailed(error.localizedDescription)
+        }
+        switch HelperFailure(rawValue: error.code) {
+        case .needsFullDiskAccess:
+            return HelperError.needsFullDiskAccess(error.localizedDescription)
+        default:
+            return HelperError.operationFailed(error.localizedDescription)
+        }
+    }
+
     /// Shared shape for "ask the helper to do something long, throw if it says no".
     ///
     /// Deliberately without a timeout: `createinstallmedia` legitimately runs for
     /// 10–20 minutes. The connection's invalidation handler is what catches a
     /// helper that dies, not a clock.
-    private func call(_ body: (HelperProtocol, @escaping (String?) -> Void) -> Void) throws {
+    private func call(_ body: (HelperProtocol, @escaping (NSError?) -> Void) -> Void) throws {
         let helper = try proxy()
-        var failure: String?
+        var failure: NSError?
         let done = DispatchSemaphore(value: 0)
 
         lock.lock()
@@ -339,8 +359,8 @@ final class PrivilegedHelper {
         inFlight = { done.signal() }
         lock.unlock()
 
-        body(helper) { message in
-            failure = message
+        body(helper) { error in
+            failure = error
             done.signal()
         }
         // Untimed on purpose: createinstallmedia legitimately runs 10-20
@@ -356,13 +376,6 @@ final class PrivilegedHelper {
 
         if let connectionError { throw connectionError }
         guard let failure else { return }
-
-        // The daemon flags the one denial a user can fix; everything else is
-        // reported verbatim rather than guessed at.
-        if failure.hasPrefix(HelperInfo.needsFullDiskAccessPrefix) {
-            throw HelperError.needsFullDiskAccess(
-                String(failure.dropFirst(HelperInfo.needsFullDiskAccessPrefix.count)))
-        }
-        throw HelperError.operationFailed(failure)
+        throw Self.decode(failure)
     }
 }
