@@ -2,7 +2,11 @@
 
 ## 2026-08-04 (session 3) — the carried item, and the queue that could never have drained
 
-**CI:** _(pending — filled in after the push)_
+**Commits:** `9290bfe` → `49e0b37` (6 this session), all pushed.
+
+**CI:** green, SHA-anchored to `49e0b37` (`headSha` verified equal to `git rev-parse HEAD`). Both
+workflows: run `30901164869` (CI — all seven steps ran, **none skipped**, including the new
+warnings-as-errors build) and run `30901164705` (Design index — first real execution, green).
 **Local:** receipt `.claude/receipts/bootit-green.build-test-lint.receipt.txt` — **233 tests, 0
 failures** (221 at session start), 0 SwiftLint violations across 46 files, **0 compiler warnings**,
 full suite ThreadSanitizer-clean, design-index lint green. From `swift package clean`, and now with
