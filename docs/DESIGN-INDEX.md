@@ -45,7 +45,7 @@ papers. A new synthesis or FDD adds its row in the same commit, or `bin/design-i
 ## Honest gaps
 
 Six of the seven rows above have **no design document at all**. That is the true state, recorded
-rather than papered over: BootIt reached v3.3.0 with one gated design decision and six subsystems
+rather than papered over: BootIt reached v3.4.0 with one gated design decision and six subsystems
 whose reasoning lives in code comments and the session log. Those comments are unusually thorough,
 but they are discoverable only by someone already reading the right file — which is the exact failure
 this index exists to reduce, not one it has fixed.

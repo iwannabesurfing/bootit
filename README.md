@@ -244,7 +244,7 @@ Tagging a version builds and publishes the DMG automatically
 ([`.github/workflows/release.yml`](.github/workflows/release.yml)):
 
 ```bash
-git tag v3.3.0 && git push origin v3.3.0
+git tag v3.4.0 && git push origin v3.4.0
 ```
 
 The workflow refuses to run if the tag and `mac/Info.plist`'s
