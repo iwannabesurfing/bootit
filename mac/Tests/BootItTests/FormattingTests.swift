@@ -1,6 +1,6 @@
 import BootItShared
 import XCTest
-@testable import BootIt
+@testable import BootItKit
 
 final class FormattingTests: XCTestCase {
 

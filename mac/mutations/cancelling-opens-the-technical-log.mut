@@ -1,6 +1,6 @@
 # Dumps diagnostics at someone who cancelled on purpose.
 filter: RunOutcome
-file: Sources/BootIt/RunPlan.swift
+file: Sources/BootItKit/RunPlan.swift
 --- old ---
             showsLogDetails: false,
             logLine: "\nCancelled.")

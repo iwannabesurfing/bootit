@@ -1,6 +1,6 @@
 # Keeps stat-ing after the flag is latched, when nothing can change the answer.
 filter: BundleReadingLatency
-file: Sources/BootIt/AppModel.swift
+file: Sources/BootItKit/AppModel.swift
 --- old ---
 guard !self.preflight.appWasReplaced, !self.bundleReadingInFlight else { return }
 --- new ---

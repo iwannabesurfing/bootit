@@ -1,6 +1,6 @@
 import BootItShared
 import XCTest
-@testable import BootIt
+@testable import BootItKit
 
 /// What the progress screen claims during the opaque copy.
 ///

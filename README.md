@@ -80,6 +80,26 @@ swiftlint lint --strict    # style + correctness lint (CI enforces this)
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs `swift build`,
 `swift test`, and SwiftLint strict on every push and pull request.
 
+### SwiftUI previews — open the `BootItKit` scheme, not `BootIt-Package`
+
+The app lives in the **`BootItKit` library**; `Sources/BootIt` is a thin `@main`
+over it and should stay that way. That split is not decoration. Xcode resolves a
+preview host from the selected scheme, and any scheme containing an executable
+target makes that executable the host — which cannot carry `ENABLE_PREVIEWS`, so
+previews fail with *"the executable target "BootIt" needs the build setting …"*
+**even for files in a library target**. All three arrangements were measured on
+Xcode 26.6:
+
+| View's target | Scheme | Renders? |
+|---|---|---|
+| executable | `BootIt-Package` | no |
+| library | `BootIt-Package` | no — error still names the executable |
+| library | **`BootItKit`** | **yes** |
+
+So: open `mac/Package.swift`, set the destination to **My Mac**, pick the
+**`BootItKit`** scheme, and the ~40 `#Preview` fixtures render. They are all
+behind `#if DEBUG` and are absent from the release binary.
+
 ### Self-test against the live catalogues (no USB needed)
 
 These hit Microsoft's / Apple's servers, so they're manual diagnostics rather
@@ -128,8 +148,16 @@ macOS asks you for two separate things, and they are not the same permission:
 
 | What | When you're asked | If it's missing |
 |------|-------------------|-----------------|
-| **Allow BootIt in the Background** | Automatically, first run | The helper never installs |
+| **Allow BootIt in the Background** | Automatically, first run — **but only an administrator can grant it** | The helper never installs |
 | **Full Disk Access** | **Never — you have to grant it** | `createinstallmedia` fails with "Operation not permitted" |
+
+**A standard (non-administrator) account cannot complete the macOS path alone.**
+Apple's own rule, from `SMAppService.h`: a LaunchDaemon "will not be bootstrapped
+until an admin approves [it] in System Settings". Registration itself succeeds for
+anyone — it is the approval that is gated. BootIt checks at drive-selection time
+and says so *before* you download ~14 GB, rather than at the wall afterwards. The
+**Windows path is unaffected**: it writes unprivileged and registers no daemon, so
+a standard account can build a Windows stick start to finish.
 
 The second one is the trap. TCC gates writes to removable volumes, and
 `createinstallmedia` writes a `.IAPhysicalMedia` cookie to the root of the USB.

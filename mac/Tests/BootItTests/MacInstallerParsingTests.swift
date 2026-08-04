@@ -1,5 +1,5 @@
 import XCTest
-@testable import BootIt
+@testable import BootItKit
 
 final class MacInstallerParsingTests: XCTestCase {
 

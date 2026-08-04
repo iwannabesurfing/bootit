@@ -18,6 +18,15 @@ struct USBStepView: View {
             if let report = model.preflight.usbAccessReport {
                 USBAccessWarning(report: report)
             }
+            if model.preflight.warnsAboutAdministrator(platform: model.platform) {
+                StatusBanner(.warning,
+                             title: "This account can't approve BootIt's helper",
+                             message: "Writing a macOS installer needs a background helper, and "
+                                    + "macOS only accepts that approval from an administrator "
+                                    + "account. Someone who administers this Mac will have to "
+                                    + "approve it in System Settings → General → Login Items & "
+                                    + "Extensions. A Windows drive needs none of this.")
+            }
 
             if model.disks.isEmpty {
                 StatusBanner(.warning,
@@ -44,13 +53,18 @@ struct USBStepView: View {
                     EraseWarning(drive: drive, acknowledged: $model.hasAcknowledgedErase)
                 }
 
-                if model.platform == .macos {
+                // Suppressed when the administrator warning above is showing:
+                // that one already explains the approval, and this one's "macOS
+                // asks *you*" would contradict it on the same screen.
+                if model.platform == .macos,
+                   !model.preflight.warnsAboutAdministrator(platform: model.platform) {
                     StatusBanner(.information,
                                  title: "macOS will ask you to approve BootIt once",
                                  message: "Apple's createinstallmedia has to run with system privileges. "
-                                        + "The first time, macOS asks you to allow BootIt to run a "
-                                        + "background helper — the prompt names BootIt. After that it "
-                                        + "won't ask again, and your password is never seen by this app.")
+                                        + "The first time, macOS asks an administrator to allow BootIt "
+                                        + "to run a background helper — the prompt names BootIt. After "
+                                        + "that it won't ask again, and your password is never seen by "
+                                        + "this app.")
                 }
             }
 
@@ -184,6 +198,14 @@ struct EraseWarning: View {
 
 #Preview("Updated while open") {
     USBStepView().environmentObject(PreviewModel.preflightWarning(replaced: true))
+        .padding().frame(width: 560)
+}
+
+/// Also the one case where the "macOS will ask you to approve BootIt once"
+/// note is suppressed, so the screen never says "macOS asks you" beside
+/// "an administrator has to".
+#Preview("Standard account — can't approve the helper") {
+    USBStepView().environmentObject(PreviewModel.preflightWarning(admin: false))
         .padding().frame(width: 560)
 }
 

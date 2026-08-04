@@ -1,5 +1,5 @@
 import XCTest
-@testable import BootIt
+@testable import BootItKit
 
 /// The progress ring's arithmetic. It lived inside `runWindows` / `runMac`,
 /// where reaching it meant a forty-minute write to a real drive, and it had no

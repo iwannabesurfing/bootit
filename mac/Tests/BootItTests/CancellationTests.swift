@@ -1,5 +1,5 @@
 import XCTest
-@testable import BootIt
+@testable import BootItKit
 
 /// Cancel has now shipped dead twice, and both times every piece existed.
 ///

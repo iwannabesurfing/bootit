@@ -84,10 +84,15 @@ enum PreviewModel {
 
     /// The drive step as it looks when a pre-flight check has something to say.
     ///
-    /// Both warnings are macOS-only — the Windows path never goes near the
+    /// Every warning here is macOS-only — the Windows path never goes near the
     /// privileged helper — so this fixes the platform rather than taking it.
+    ///
+    /// `admin` defaults to true rather than to the real reading: leaving it nil
+    /// would make the administrator banner appear or not depending on who is
+    /// running Xcode, which is not a fixture.
     static func preflightWarning(replaced: Bool = false,
-                                 access: AccessDiagnostics.Report? = nil) -> AppModel {
+                                 access: AccessDiagnostics.Report? = nil,
+                                 admin: Bool? = true) -> AppModel {
         // The reading has to *change* between the one taken at init and the one
         // taken by the check — a constant closure returns the same identity both
         // times and nothing would ever look replaced.
@@ -97,7 +102,8 @@ enum PreviewModel {
                 bundleIdentity: {
                     AppBundleWatch.Identity(inode: replaced ? readings.next() : 0, device: 0)
                 },
-                usbAccessProbe: { access }))
+                usbAccessProbe: { access },
+                administratorCheck: { admin }))
         model.platform = .macos
         model.step = .usb
         model.disks = sampleDrives

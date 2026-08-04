@@ -23,3 +23,8 @@ mac/vendor/
 xcuserdata/
 DerivedData/
 *.xcuserstate
+
+# Xcode's per-user package state — window layout and which scheme was last
+# selected. The schemes themselves are generated from Package.swift's products,
+# so nothing here is needed to reproduce the preview setup.
+mac/.swiftpm/

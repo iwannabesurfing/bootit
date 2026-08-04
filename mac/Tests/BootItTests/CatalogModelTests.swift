@@ -1,5 +1,5 @@
 import XCTest
-@testable import BootIt
+@testable import BootItKit
 
 /// What can be installed, and what happens when the user changes their mind
 /// while the answer is still in flight.

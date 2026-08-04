@@ -1,6 +1,6 @@
 import BootItShared
 import XCTest
-@testable import BootIt
+@testable import BootItKit
 
 /// Asking whether the helper can write *before* the user commits to erasing.
 ///

@@ -1,5 +1,5 @@
 import XCTest
-@testable import BootIt
+@testable import BootItKit
 
 /// "Test USB Access" reported **"USB access blocked"** for a run in which it had
 /// never reached the helper at all, and offered Full Disk Access as the remedy.

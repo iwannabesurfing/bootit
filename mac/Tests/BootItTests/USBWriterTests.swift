@@ -1,5 +1,5 @@
 import XCTest
-@testable import BootIt
+@testable import BootItKit
 
 /// Exercises the USB writer's copy / split / verify stages against temp
 /// directories standing in for the mounted ISO and formatted USB — no real

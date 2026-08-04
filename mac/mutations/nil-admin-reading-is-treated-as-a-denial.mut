@@ -1,0 +1,8 @@
+# "Could not establish" becomes "no", so a failed reading tells an
+# administrator to go and find an administrator.
+filter: AdminRightsTests
+file: Sources/BootItKit/Services/InstallPreflight.swift
+--- old ---
+        platform == .macos && isAdministrator == false
+--- new ---
+        platform == .macos && isAdministrator != true

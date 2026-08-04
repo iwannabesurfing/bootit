@@ -1,13 +1,14 @@
 import Foundation
 
-/// The two questions that belong *before* the user commits to erasing a drive,
-/// and the state of their answers.
+/// The questions that belong *before* the user commits to erasing a drive, and
+/// the state of their answers.
 ///
-/// Both were previously discoverable only after committing — one as a confusing
-/// mid-run failure, the other behind Help → Privileged Helper… → Test USB
-/// Access, which no first-run user has a reason to open. They are collected here
-/// rather than spread across `AppModel` because they are the same thing at
-/// different distances: *can this app still do the work it is about to promise?*
+/// Each was previously discoverable only after committing — one as a confusing
+/// mid-run failure, one behind Help → Privileged Helper… → Test USB Access,
+/// which no first-run user has a reason to open, and one at a System Settings
+/// switch reached after a 14 GB download. They are collected here rather than
+/// spread across `AppModel` because they are the same thing at different
+/// distances: *can this app still do the work it is about to promise?*
 ///
 /// A value type, held in a single `@Published` property, so SwiftUI republishes
 /// on any change without a nested-observable subscription — and so the decisions
@@ -28,6 +29,13 @@ struct InstallPreflight {
 
     /// The bundled helper binary as it was when this process launched.
     let launchIdentity: AppBundleWatch.Identity?
+
+    /// Whether this account can approve the privileged helper — nil for "could
+    /// not establish". Read once at init rather than per render: an account
+    /// being promoted to administrator mid-session is a thing that requires
+    /// another administrator to be sitting at the machine already, and the
+    /// warning it would clear is one sentence of over-caution.
+    let isAdministrator: Bool?
 
     /// True once the bundle this process launched from has been replaced on disk.
     ///
@@ -50,13 +58,29 @@ struct InstallPreflight {
     private var probeID = 0
 
     init(bundleIdentity: @escaping () -> AppBundleWatch.Identity? = InstallPreflight.currentBundleIdentity,
-         usbAccessProbe: @escaping () -> AccessDiagnostics.Report? = InstallPreflight.defaultUSBAccessProbe) {
+         usbAccessProbe: @escaping () -> AccessDiagnostics.Report? = InstallPreflight.defaultUSBAccessProbe,
+         administratorCheck: () -> Bool? = { AdminRights.isAdministrator() }) {
         self.bundleIdentity = bundleIdentity
         self.usbAccessProbe = usbAccessProbe
         self.launchIdentity = bundleIdentity()
+        self.isAdministrator = administratorCheck()
     }
 
     // MARK: - Decisions
+
+    /// Whether to say, before anything is downloaded or erased, that the macOS
+    /// path ends at a switch this account cannot flip.
+    ///
+    /// Only `false` warns. nil is silence, because `AdminRights` returns nil for
+    /// "could not establish" and a warning built on a failed reading would tell
+    /// administrators to go and find an administrator.
+    ///
+    /// Windows is never warned about: that path writes unprivileged and
+    /// registers no daemon, so a standard account completes it unaided. Nor is
+    /// a nil platform, which is "not chosen yet" and belongs to neither.
+    func warnsAboutAdministrator(platform: AppModel.Platform?) -> Bool {
+        platform == .macos && isAdministrator == false
+    }
 
     /// An unreadable identity on either side is **not** a replacement. This
     /// gates the Start button, so the failure to prefer is refusing to make a

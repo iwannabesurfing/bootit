@@ -28,9 +28,11 @@ enum HelperError: LocalizedError {
                 choose BootIt in your Applications folder. Then try again.
                 """
         case .needsApproval:
-            return "BootIt needs your approval to install its privileged helper. "
+            return "BootIt needs an administrator's approval to install its privileged helper. "
                  + "Open System Settings → General → Login Items & Extensions, enable BootIt "
-                 + "under “Allow in the Background”, then try again."
+                 + "under “Allow in the Background”, then try again. macOS only accepts this "
+                 + "approval from an administrator account — if this one isn't, someone who "
+                 + "administers this Mac has to give it."
         case .registrationFailed(let m):
             return "Couldn't install BootIt's privileged helper: \(m)"
         case .notConnected(let m):

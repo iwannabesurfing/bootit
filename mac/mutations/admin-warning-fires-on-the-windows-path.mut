@@ -1,0 +1,8 @@
+# Warns a standard account about a daemon the Windows path never registers,
+# blocking the one platform that has no such gate.
+filter: AdminRightsTests
+file: Sources/BootItKit/Services/InstallPreflight.swift
+--- old ---
+        platform == .macos && isAdministrator == false
+--- new ---
+        isAdministrator == false

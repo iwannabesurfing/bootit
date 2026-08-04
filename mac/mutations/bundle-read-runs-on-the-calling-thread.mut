@@ -1,7 +1,7 @@
 # Restores the synchronous main-thread stat. On a stalled network mount this is the
 # app beachballing every time it comes to the front.
 filter: BundleReadingLatency
-file: Sources/BootIt/AppModel.swift
+file: Sources/BootItKit/AppModel.swift
 --- old ---
             self.bundleReader.async { [weak self] in
                 let current = read()

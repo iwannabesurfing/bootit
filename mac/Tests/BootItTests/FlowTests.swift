@@ -1,5 +1,5 @@
 import XCTest
-@testable import BootIt
+@testable import BootItKit
 
 /// Covers the navigation and enablement logic that used to live inside
 /// `ContentView`, where nothing could reach it. `AppModel()` performs no I/O on

@@ -1,5 +1,5 @@
 import XCTest
-@testable import BootIt
+@testable import BootItKit
 
 /// Covers the derived presentation state the views read: which stages the
 /// indicator shows, which page heading applies, and how the write phases are

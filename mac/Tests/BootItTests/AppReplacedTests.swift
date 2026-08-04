@@ -1,5 +1,5 @@
 import XCTest
-@testable import BootIt
+@testable import BootItKit
 
 /// BootIt ships as a DMG, so an update is a drag-and-replace — often performed
 /// with the old copy still open, because hitting a bug is what sent the user to

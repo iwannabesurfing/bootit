@@ -168,9 +168,10 @@ struct HelperStatusView: View {
                                detail: "The helper is registered and allowed to run.",
                                healthy: true)
         case .requiresApproval:
-            return Description(title: "Waiting for your approval",
+            return Description(title: "Waiting for an administrator's approval",
                                detail: "Open System Settings → General → Login Items & Extensions "
-                                     + "and enable BootIt under “Allow in the Background”.",
+                                     + "and enable BootIt under “Allow in the Background”. macOS "
+                                     + "only accepts this from an administrator account.",
                                healthy: false)
         case .notRegistered:
             return Description(title: "Not installed",

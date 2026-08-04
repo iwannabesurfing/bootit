@@ -39,14 +39,21 @@ papers. A new synthesis or FDD adds its row in the same commit, or `bin/design-i
 | **Drive safety** — nothing preselected, selection tracked by id, destructive confirmation | _no synthesis_ | — | `AppModel.refreshDisks` · `RootView` confirmation dialog · session log 2026-08-01 |
 | **Run presentation** — progress spans, and cancelled-versus-failed | _no synthesis_ | — | `RunPlan` (+ `RunPlanTests`, which is where its rules are falsifiable) |
 | **Release + distribution** — Apple Silicon only, signing, notarisation, staged publish | _no synthesis_ | — | `README.md` · `mac/build.sh` · `mac/package.sh` · `.github/workflows/release.yml` |
+| **Who can approve the helper** — a standard account cannot, and learns so before it downloads 14 GB | _no synthesis; the rule is Apple's, quoted at the call site_ | `SMAppService.h` (`registerAndReturnError` discussion) quoted in `AdminRights` | `AdminRights` · `InstallPreflight.warnsAboutAdministrator` · `AdminRightsTests` · session log 2026-08-05 |
+| **Package shape** — why the app is a library plus a thin `@main`, and not one executable target | _no synthesis; three arrangements measured in Xcode 26.6, recorded in `Package.swift`_ | — | `mac/Package.swift` (`products`) · `BootItMain` · `Sources/BootIt/Main.swift` · session log 2026-08-05 |
 
 ## Honest gaps
 
-Four of the five rows above have **no design document at all**. That is the true state, recorded
-rather than papered over: BootIt reached v3.3.0 with one gated design decision and four subsystems
+Six of the seven rows above have **no design document at all**. That is the true state, recorded
+rather than papered over: BootIt reached v3.3.0 with one gated design decision and six subsystems
 whose reasoning lives in code comments and the session log. Those comments are unusually thorough,
 but they are discoverable only by someone already reading the right file — which is the exact failure
 this index exists to reduce, not one it has fixed.
+
+Two of those rows are a weaker gap than the others, and the difference is worth naming: the helper-
+approval rule and the package shape were each **measured or quoted from a primary source before being
+acted on**, and the evidence sits at the call site rather than in a reviewer's memory. That is not a
+design document, but it is falsifiable, which "we decided this at some point" is not.
 
 The rows are listed anyway. A pointer to "the reasoning is in `PrivilegedHelper` and the 2026-08-03
 log" is worth more to a fresh session than an absent row, and it is the honest thing to write.

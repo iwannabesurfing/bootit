@@ -1,6 +1,6 @@
 import BootItShared
 import XCTest
-@testable import BootIt
+@testable import BootItKit
 
 /// The seam between the daemon's samples and the state machine.
 ///

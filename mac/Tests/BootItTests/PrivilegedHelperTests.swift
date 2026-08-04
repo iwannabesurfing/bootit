@@ -1,5 +1,5 @@
 import XCTest
-@testable import BootIt
+@testable import BootItKit
 @testable import BootItShared
 
 /// The daemon runs as root and its whole job is to erase disks, so the two

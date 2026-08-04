@@ -1,5 +1,5 @@
 import XCTest
-@testable import BootIt
+@testable import BootItKit
 @testable import BootItShared
 
 /// Erasing the stick was written out twice — app and daemon — and the copies

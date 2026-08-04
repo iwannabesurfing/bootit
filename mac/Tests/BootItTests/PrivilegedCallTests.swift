@@ -1,5 +1,5 @@
 import XCTest
-@testable import BootIt
+@testable import BootItKit
 @testable import BootItShared
 
 /// A stand-in daemon.

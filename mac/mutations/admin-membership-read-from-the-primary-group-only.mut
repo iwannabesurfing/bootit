@@ -1,0 +1,9 @@
+# Asks only whether `admin` is the user's *primary* group rather than one of
+# their memberships. Nobody's primary group is admin, so every account on the
+# machine becomes a standard user — including the administrator running it.
+filter: AdminRightsTests
+file: Sources/BootItKit/Services/AdminRights.swift
+--- old ---
+            if result >= 0 { return groups.prefix(Int(count)).contains(admin) }
+--- new ---
+            if result >= 0 { return primary == admin }

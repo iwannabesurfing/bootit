@@ -1,5 +1,5 @@
 import XCTest
-@testable import BootIt
+@testable import BootItKit
 @testable import BootItShared
 
 /// The daemon used to signal the one user-fixable failure by prefixing its
