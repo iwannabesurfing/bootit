@@ -58,3 +58,21 @@ failure lands as "the release didn't appear" long after the cause.
   evidence**, in the same way a local test receipt and a CI green are separate.
 - Before any release, check the credentials are still present. Their absence is invisible until
   precisely the moment they are needed.
+
+## Followed on the next release, 2026-08-05 (v3.4.0)
+
+The advice above was applied rather than assumed. All six secrets were confirmed present *before*
+the tag went up, and afterwards the artefact was checked at `releases/latest/download/BootIt.dmg`
+— the durable URL the marketing page points at — not at the workflow's own upload:
+
+```
+DMG   accepted — source=Notarized Developer ID, LEME Digital (MD4M4DL5PP)
+.app  accepted — source=Notarized Developer ID
+      stapler validate → worked          # opens offline, ticket embedded
+      CFBundleShortVersionString → 3.4.0 # the bump actually reached the bundle
+```
+
+Nothing was wrong this time, which is the point worth recording: the check costs one download and
+is the only evidence that separates "the pipeline passed" from "the thing shipped". Note the
+`latest` URL specifically — checking the tag's own asset page would not have proven that the
+download link on the website now serves the new version.

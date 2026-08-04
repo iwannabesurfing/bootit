@@ -1,5 +1,119 @@
 # BootIt — session log
 
+## 2026-08-05 (session 2) — v3.4.0 shipped, and the account nobody needed to create
+
+**Commits:** `031b7fc` (bump) → this log entry. Tag `v3.4.0` pushed.
+
+**CI:** green, SHA-anchored to `031b7fc` (`headSha` verified equal to `git rev-parse HEAD`).
+Run `30959694084` — all eight steps ran, **none skipped**. Design index green (`30959694082`).
+**Release:** run `30961284215` — all twelve steps green, including the tag↔`Info.plist` check,
+the Developer ID import and notarisation.
+**Local:** receipt `.claude/receipts/bootit-green.build-test-lint.receipt.txt` — **241 tests, 0
+failures**, 0 SwiftLint violations across 48 files, 0 compiler warnings from a cleaned tree with
+`-Xswiftc -warnings-as-errors`, full suite ThreadSanitizer-clean, design-index lint green,
+mutation-harness self-test green (seven checks, seven distinct reasons).
+
+### The headline
+
+The previous session left **nothing carried** and named the release as the one thing with outside
+consequences. That is what this session did. No compiled source changed — the only edits are
+version strings, a README example and one prose line.
+
+**v3.4.0 is live**, signed, notarised and stapled. It is the first release carrying the
+administrator warning, the `BootItKit` restructure and the off-main-thread bundle read; GitHub had
+been shipping v3.3.0, which predates all three.
+
+### The release was verified from the URL a user actually hits
+
+A green publish job is not a published artefact — this repo already carries
+`publish-gated-on-a-secret-succeeds-silently` in the queue for that exact failure. So the check was
+made against `releases/latest/download/BootIt.dmg`, the durable URL `leme.com.au/bootit/` points at,
+not against the workflow's own artifact:
+
+| Check | Result |
+|---|---|
+| DMG through Gatekeeper | `accepted — source=Notarized Developer ID`, LEME Digital (MD4M4DL5PP) |
+| `.app` inside it | `accepted — source=Notarized Developer ID` |
+| `stapler validate` | worked — the ticket is stapled, so it opens offline |
+| `CFBundleShortVersionString` | `3.4.0` |
+| Architecture / helper | arm64, `BootItHelper` embedded |
+
+The bundle was also assembled locally before the tag went up, because `mac/Info.plist` is read by
+`build.sh` and **not** by `swift build` — so the version bump is invisible to the entire test suite.
+Checked against the binary's own timestamp (5 s old), since a stale `dist/` answers just as
+confidently. Release binary: **zero** preview symbols.
+
+### The one open question narrowed itself, for free
+
+Carried as "if it is ever worth an account": does a standard user get an authentication sheet on the
+Login Items switch, or is it simply unavailable? Last session's own lesson says to ask whether a
+primary source answers a human-gated question first. One does — on this machine:
+
+```
+com.apple.ServiceManagement.daemons.modify   →  k-of-n 1 of
+  is-root
+  entitled-admin-or-authenticate-admin-nonshared  →  k-of-n 1 of
+      entitled-admin-nonshared
+      authenticate-admin-nonshared   →  class: user, group: admin,
+                                        authenticate-user: true, shared: false
+```
+
+`authenticate-user: true` with `group: admin` is the shape that **presents a sheet and accepts any
+administrator's credentials** — it does not require the session's owner to be one. Corroborating:
+`LoginItems.appex` links `SFAuthorization` and carries `performForWindowID:withAuthorization:`,
+which is a UI built to run an action behind a sheet, not one that greys a switch out.
+
+**This did not close the question and the copy was not changed.** Neither reading names the
+daemon-approval toggle specifically: the right proves what ServiceManagement requires, the appex
+proves the pane *can* raise a sheet, and "System Settings routes this switch through that right" is
+inference. Shipping *"an administrator can approve it here, now"* on an inference fails in the
+confident direction. The existing wording is merely pessimistic, which is the safe one.
+
+What changed is the **cost of closing it**: someone with a standard account now observes one thing —
+sheet or no sheet — instead of exploring.
+
+### Decisions
+
+- **Minor bump, 3.4.0, not 3.3.1.** The administrator warning is a new user-facing surface, not a
+  fix to an existing one.
+- **Published directly, not as a draft.** All six repo secrets are present, the previous two
+  releases went the same way, and a draft would add a manual step to a path that has been green
+  three times running.
+- **The auth-database reading was recorded, not acted on** — see above.
+- **`docs/DESIGN-INDEX.md`'s honest-gaps line moved to v3.4.0.** It states which version reached
+  this state with six undocumented subsystems; leaving it at v3.3.0 would date the claim rather
+  than the gap.
+
+### Test results
+
+241 tests, 0 failures — unchanged from session start, and that is the point: no compiled source was
+touched. SwiftLint strict 0 violations across 48 files. TSAN-clean. Mutation-harness self-test green.
+The eleven-mutation corpus was **not** re-run, deliberately: every anchor was re-verified last
+session after the restructure that moved them, and nothing has moved since.
+
+### Next session should start with
+
+1. **Nothing carried.** The release is out and verified, the queue validates clean, the design index
+   is current.
+2. **The auth-sheet question, now one observation wide** — log in as a standard user, open Login
+   Items, and look. If a sheet appears, the warning copy improves from "someone who administers this
+   Mac has to approve it" to "an administrator can approve it here, now". Not a blocker.
+3. **A real end-to-end run on v3.4.0 hardware.** The macOS path has not been exercised against a
+   notarised build since the restructure — the code is unchanged and CI is green, but the helper
+   registration path is the one thing only a signed build from `/Applications` can prove.
+4. **`AppModel`'s pipeline is still untested as sequencing** — recorded three sessions ago as a
+   deliberate skip with reasoning. The trigger should be a bug in the sequencing, not a line count.
+
+[promote-profile:swift: "will macOS let a non-admin do this?" is usually answerable without a second account — `security authorizationdb read <right>` resolves the rule chain, and `class: user` + `group: admin` + `authenticate-user: true` means a sheet is presented that ANY administrator can satisfy in someone else's session, while a rule with no authenticate leg is decided by who is logged in and no sheet helps]
+
+No second candidate was filed for "verify the release from its public URL" — the queue already
+carries `publish-gated-on-a-secret-succeeds-silently`, whose advice this session followed rather
+than rediscovered. That candidate gained a section recording the check being applied and passing.
+The federation queue is 276 pending against a 221 ceiling; a near-duplicate is a cost, not a
+capture.
+
+[promote-spine: a version string that only a packaging script reads is invisible to the entire test suite — bumping it changes nothing any test can see, so assemble the artefact and read the version back out of it before tagging]
+
 ## 2026-08-05 — both stale questions closed, and the fix for one was wrong
 
 **Commits:** `e4bddad` → `16af11c` (3 this session), all pushed.
