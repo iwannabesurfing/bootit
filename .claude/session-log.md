@@ -1,5 +1,149 @@
 # BootIt — session log
 
+## 2026-08-04 (session 2) — the drive ran, and the measurement overruled the model
+
+**Commits:** `1525e6e` → `9ea5b08` (6 this session), all pushed.
+
+**CI:** green, SHA-anchored to `9ea5b08` (`headSha` verified equal to `git rev-parse HEAD`).
+**Local:** receipt `.claude/receipts/bootit-green.build-test-lint.receipt.txt` — **203 tests, 0
+failures** (173 at session start), 0 SwiftLint violations across 43 files, **0 compiler warnings**,
+full suite ThreadSanitizer-clean. Receipt now runs from `swift package clean`, so a cached warning
+cannot pass as an absent one.
+
+### The headline
+
+**The first instrumented hardware run happened**, and it settled three open questions — one of them
+against the tri-model prediction. The trace is committed as a fixture and replayed by
+`RecordedRunTests`, so three sessions of claims about copy progress are now tests that fail in
+milliseconds instead of notes checkable only by a 40-minute human-gated write.
+
+**The bug that shipped three times, finally recorded rather than inferred.** Filesystem used-bytes
+reaches **99.9% of its final value at 310 s — 18% of the way through** a 28.8-minute run. At that
+instant the drive had written **12.7%** of what it would write and **23.6 minutes remained**. It
+then does not move for over fifteen minutes. No clamp rescues that: `df` measures something that
+finishes long before the drive does.
+
+### Question 1 is closed, and the prediction was wrong
+
+Two of three tri-model legs argued `proc_pid_rusage` counts writes into the unified buffer cache,
+so it would sprint to the payload size in ~2 minutes and then freeze — the `df` failure one layer
+up. **It did neither.** It tracked the device counter for the whole run and finished **1.2% below
+it**. On this hardware it would have served perfectly well as a numerator.
+
+The design did not change and should not: the reason there is no percentage is that the
+**denominator** is unknowable before the run, and a second well-behaved numerator supplies none.
+But a supporting argument was false, and it is recorded as false. **Two of three models agreeing
+is not evidence** — that is the whole reason the run was worth doing.
+
+Question 3 also closed: the tail is **transfer, not flush** — 1519 MB at 9.2 MB/s in the 166 s
+*after* `createinstallmedia` printed "100%". Question 2: **1.048**, against M1's 1.058 from an
+assumed baseline. Question 4 (sleep / re-enumeration) is **still open and marked untested** — this
+run had neither, and saying it passed would be the exact error this log has made before.
+
+### Measured before it evaporated
+
+The stick was read the moment it was plugged in, before anything wrote to it: **871,936 bytes / 59
+write operations** while merely mounted. A freshly attached drive does **not** start at zero.
+That is M3, and it closes the gap M1 named as the reason its own confidence was LOW-MEDIUM — "the
+baseline at run start is assumed, not measured". It is no longer assumed.
+
+### The sanitizer became a gate, and earned it within the hour
+
+`swift test --sanitize=thread` runs in CI now, proven in **both** directions before being trusted:
+restoring the unsynchronised `AppModel.ingest` makes it exit 1 with 8 race warnings; the fixed tree
+exits 0. In the existing job, not its own — a second macOS runner bills at 10x where this reuses
+the checked-out tree for 21 s.
+
+It then caught a race in a **test written minutes earlier** — a plain counter touched from two
+probe threads. Not production code, but a racing test fails that gate on somebody else's unrelated
+change, which is a worse debt than the one it was written to prevent.
+
+### Both pre-flight questions now asked before the user commits
+
+- **App replaced while open.** BootIt ships as a DMG, so updating is a drag-and-replace, usually
+  done *because* the user hit something — with the old copy still open. The running process then
+  reads the new bundle: `isStale()` fingerprints the *new* helper, installs it, and leaves the old
+  app talking to a newer daemon across a changed protocol. Noticed on `didBecomeActive` for one
+  `stat`. **Inode, not mtime** — Finder, `ditto` and `cp -p` all preserve timestamps, and there is
+  a test pinning exactly that. Latches, survives `reset()`, never interrupts a run in flight.
+- **Full Disk Access.** The answer already existed behind Help → Privileged Helper… → Test USB
+  Access, where no first-run user looks. Now runs on drive selection — but **only when the daemon
+  is already installed**, because `AccessDiagnostics.run()` calls `ensureReady()`, which registers
+  it. Probing regardless would install a root LaunchDaemon because someone plugged in a stick.
+
+`probeWrite` now routes through `decode()`, which is what makes the FDA button correct rather than
+guessed — a TCC denial and a read-only volume are both refusals, and only one is fixed in that
+settings pane. That closes the carried item, but it was done because the banner needed it.
+
+### Decisions
+
+- **Kept `fileURL`; `parseTrace` earned its keep.** `parseTrace` now has a real caller — replaying
+  the recorded run. `fileURL` has four test callers and is the only thing making the writer's
+  output observable; removing it would duplicate path construction into the tests and stop checking
+  that the writer writes where it claims. **Not the same shape** as the dead code removed twice
+  before (`pruneOldTraces`, `helperVersion`), which was unreachable rather than test-only.
+- **Decomposed `AppModel` rather than raising the lint limit.** It sat at **396 of a 400-line
+  budget**; the feature nets +6 after extracting `InstallPreflight`, `CopyRing`, and two selection
+  helpers onto `MacOSGroup`. Honest caveat: by the last extraction I was shaving to hit a number.
+- **Did not change the design on the strength of the falsified prediction.** Recorded it and moved
+  on. Changing a shipped decision because one supporting argument fell over — while the load-bearing
+  one (no denominator) still holds — would be the fourth wrong answer, not the first right one.
+
+### Issues discovered
+
+- **Last session's log claimed "0 compiler warnings" while citing a receipt that contained one.**
+  `CopyTraceWriter.swift:89`, `result of 'try?' is unused`, present the whole time. Second time in
+  two sessions a claim in the record was contradicted by the artefact it pointed at. Fixed, and the
+  receipt now rebuilds from clean so this cannot recur silently.
+- **I called two things early on partial data.** Said `processBytes` was "flat at 0" after 12
+  samples (it was zero only before bulk copying started), and wrote two assertions from assumption
+  — that `df` goes *blind* (it goes **static**; only 16 samples were nil) and that it stays frozen
+  to the end (one tick at unmount). The tests caught both. That is the cheapest place this project
+  has ever caught that class of error, and it is the class the trace format exists to prevent.
+- **`SMAppService` approval persists across a same-signature update.** v3.1.0 → this build
+  re-registered the helper with **no prompt**. Worth knowing before shipping an update.
+- **`AppModel` is a god object at its ceiling.** Four lines of headroom on a class doing
+  navigation, catalogue, disks, pipeline, progress and now pre-flight. A real decomposition
+  deserves its own change, not smuggling inside a feature.
+
+### Test results
+
+203 tests, 0 failures (173 at session start). SwiftLint strict: 0 violations, 43 files. 0 compiler
+warnings from a fully cleaned tree. Full suite TSAN-clean, and TSAN is now enforced in CI.
+
+**Nine mutation checks, each build-verified before its result was believed** — the harness asserts
+the mutated tree compiles, because a patch that silently fails to apply reports SURVIVES and reads
+as "this test does not bite". One genuinely survived (`reset()` not clearing the access warning)
+and got a test; the rest bit first time. All nine were re-run after the `InstallPreflight`
+refactor, since the anchors moved and the earlier results no longer certified the shipped code.
+
+Not covered by tests, and said so in the code rather than faked: the `status == .enabled` guard
+that stops a drive click from installing a root daemon. Asserting it under XCTest would assert
+`SMAppService`'s behaviour; removing it to watch a test fail would register a daemon on the machine
+running the suite.
+
+### Next session should start with
+
+1. **Decompose `AppModel`.** 396 → 400 of its budget before this session touched it. The catalogue
+   loaders are the obvious first extraction (they own `loadingCatalog`, `catalogError`, `editions`,
+   `languages`, `macInstallers` and the selection state). Deserves a senior review.
+2. **Question 4 — do the counters survive sleep and re-enumeration mid-run?** The only open
+   measurement. Needs a deliberately hostile run: sleep the Mac, or unplug and replug, mid-copy.
+   The defensive handling already exists; what is missing is evidence it works.
+3. **Ship a release with the pre-flight work.** v3.2.0 is current; this session's work is unreleased.
+   Pushing a `v*` tag now publishes signed and notarised on its own.
+4. **The bundled-helper staleness check runs on every `didBecomeActive`** — one `stat`, measured as
+   negligible, but never profiled with a slow network volume as the bundle's parent.
+
+**Federation note:** queue-drain budget was over ceiling at session start (255 > 221, +34 owed) and
+this session adds 3. Capture kept deliberately narrow.
+
+[promote-spine: a prediction that survived three independent models can still be false, and only measurement settles it — BootIt's tri-model gate had two of three legs predict `proc_pid_rusage` counts buffer-cache writes and would race to payload size then freeze, and the first instrumented run showed it tracking the device counter to within 1.2% for 29 minutes; the decision it supported was correct for a *different* reason (no knowable denominator), so the design stood, but "two of three models agreed" was recorded as evidence when it was consensus, and consensus among models trained on overlapping data is not independent confirmation]
+
+[promote-spine: a test written from assumption fails in seconds where the same assumption in shipped code fails after forty minutes — writing assertions about BootIt's recorded run surfaced two wrong beliefs immediately (that filesystem used-bytes goes *blind* mid-run when it actually goes *static*, and that it stays frozen to the end when it ticks once at unmount), both of which had already been stated confidently in prose; the discipline is to assert the number you believe BEFORE looking at it, because a test is the cheapest place to be wrong and prose is the most expensive]
+
+[promote-spine: a CI gate must be proven to fail before it is trusted to pass — BootIt added `swift test --sanitize=thread` to CI and verified it in both directions first, restoring a known race to confirm exit 1 with 8 warnings and the fixed tree to confirm exit 0, because the same repo had already shipped a release workflow whose signing steps silently skipped and reported success; a step that cannot go red is worse than no step, since it converts an unchecked property into one everybody believes is checked]
+
 ## 2026-08-04 — the progress bar stopped claiming a percentage, and review found the race
 
 **Commits:** `06e184e` → `db3d349` (3 this session), all pushed.

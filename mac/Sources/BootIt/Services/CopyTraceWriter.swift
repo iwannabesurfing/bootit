@@ -57,6 +57,24 @@ final class CopyTraceWriter {
         return formatter.string(from: date)
     }
 
+    /// Where this writer's trace is going.
+    ///
+    /// **Kept, decided 2026-08-04.** It has no production caller and was queued
+    /// for removal alongside `parseTrace` — which has since acquired one, since
+    /// `RecordedRunTests` replays a real recorded run through it.
+    ///
+    /// This one stays for a different reason. It is the only thing that makes
+    /// the writer's output observable: four tests use it to find the file they
+    /// just caused, including the one proving a closed trace cannot be reopened
+    /// and extended. Removing it would mean each of them rebuilding the path
+    /// from `directory` and the stamp, which duplicates the construction being
+    /// tested and quietly stops checking that the writer writes where it claims.
+    ///
+    /// Not the same shape as the dead code this project has removed twice.
+    /// `pruneOldTraces` was called by nothing at all and `helperVersion` served a
+    /// fallback nobody implemented — both unreachable. A one-line accessor with
+    /// four callers is used code; that its callers are tests is not a defect in
+    /// a class whose entire job is to leave a file behind.
     var fileURL: URL { url }
 
     /// Best-effort throughout. A trace that cannot be written is worth nothing
