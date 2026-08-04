@@ -1,6 +1,6 @@
 # BootIt — session log
 
-## 2026-08-04 (session 2) — the drive ran, and the measurement overruled the model
+## 2026-08-04 (session 2) — the drive ran, the measurement overruled the model, and v3.3.0 shipped
 
 **Commits:** `1525e6e` → `9ea5b08` (6 this session), all pushed.
 
@@ -122,18 +122,67 @@ that stops a drive click from installing a root daemon. Asserting it under XCTes
 `SMAppService`'s behaviour; removing it to watch a test fail would register a daemon on the machine
 running the suite.
 
+### After the log above was written — the session kept going
+
+Four more commits, `51575c9` → `071d444`, and **v3.3.0 shipped**. All three items this log had
+queued for "next session" were done in this one.
+
+**The eject error was inventing its reason.** A finished run said "Couldn't eject SanDisk 3.2Gen1
+— a file on it may still be open." `lsof` showed nothing open on the volume and
+`diskutil eject disk4` succeeded from a shell moments later. The sentence was hardcoded and
+printed for every failure, in the grammar of a diagnosis, while diskutil's own output — which
+names the process holding the disk, "Dissenter PID=442 (mds)" — was discarded.
+
+**Third instance of this exact mistake.** `20e1874` stopped guessing at the helper's reason for
+refusing; `AccessDiagnostics` stopped rendering every daemon refusal as "enable Full Disk Access";
+this was the eject path. It also rendered as grey `.footnote` text under a green tick, so an
+action that did not happen read as a hint. It is a warning banner now.
+
+**Question 4 closed, and it needed five minutes rather than another 40-minute run.** The hazard is
+a property of the counter, not of a copy in flight, so it was measured on an idle drive:
+
+| Event | before | after | |
+|---|---|---|---|
+| Unplug + replug | 21,261,767,168 | 99,840 | **resets** |
+| Sleep + wake | 99,840 | 247,808 | **survives** |
+
+Two different hazards; only one needs handling, and the existing handling is right. ChatGPT's leg
+raised this and neither other leg did. See M5.
+
+**`AppModel` decomposed: 396 → 345.** Fifty-five lines of headroom instead of four. The catalogue —
+twelve published properties, three loaders, four derived accessors — moved to `CatalogModel`, a
+value type in one `@Published` property, the same shape as `InstallPreflight`.
+
+The find: **the supersede logic had no tests, in either place.** It lived as a `catalogLoadID`
+compared inside each completion handler, and could not easily have been tested where it was —
+exercising it meant driving a live Microsoft fetch through a class that also owned the write
+pipeline. Two mutation checks survived the whole suite. Extraction is what made it reachable.
+
+One of those mutations then survived a second time, because my first test asserted the wrong
+thing: that a pre-reset reply is discarded, which both a carried and a restarted load counter
+satisfy. The real hazard is a **collision** — a restarted counter hands the first fetch after a
+reset the same id as one still in flight, so the older reply is accepted as the answer to the
+newer question.
+
+**v3.3.0 shipped, and was verified rather than trusted.** All twelve workflow steps ran with none
+skipped — the silent-skip failure mode this workflow has form for. The published DMG was
+downloaded and checked: `accepted`, `source=Notarized Developer ID`, ticket stapled, app inside
+3.3.0 / arm64 / helper embedded, durable URL resolving 200.
+
+**221 tests** at close (173 at session start), TSAN-clean, 0 lint violations, 0 compiler warnings.
+**Fourteen mutation checks** across the session, every one build-verified before its result was
+believed; three genuinely survived and got tests.
+
 ### Next session should start with
 
-1. **Decompose `AppModel`.** 396 → 400 of its budget before this session touched it. The catalogue
-   loaders are the obvious first extraction (they own `loadingCatalog`, `catalogError`, `editions`,
-   `languages`, `macInstallers` and the selection state). Deserves a senior review.
-2. **Question 4 — do the counters survive sleep and re-enumeration mid-run?** The only open
-   measurement. Needs a deliberately hostile run: sleep the Mac, or unplug and replug, mid-copy.
-   The defensive handling already exists; what is missing is evidence it works.
-3. **Ship a release with the pre-flight work.** v3.2.0 is current; this session's work is unreleased.
-   Pushing a `v*` tag now publishes signed and notarised on its own.
-4. **The bundled-helper staleness check runs on every `didBecomeActive`** — one `stat`, measured as
-   negligible, but never profiled with a slow network volume as the bundle's parent.
+1. **The bundled-helper staleness check runs on every `didBecomeActive`** — one `stat`, measured as
+   negligible, but never profiled with a slow network volume as the bundle's parent. The only
+   carried item, and a small one.
+2. **Nothing else is outstanding.** All five queued items from the previous session are closed, all
+   four §5 research questions are answered, and v3.3.0 is out. The next real work is new work.
+3. **Consider whether `AppModel` needs a second pass.** 345 of 400 is comfortable, but it still owns
+   navigation, disks, the pipeline and progress. The catalogue was the largest coherent slice; the
+   write pipeline is the next one, and a bigger job than this was.
 
 **Federation note:** queue-drain budget was over ceiling at session start (255 > 221, +34 owed) and
 this session adds 3. Capture kept deliberately narrow.
