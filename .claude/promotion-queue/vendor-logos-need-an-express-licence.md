@@ -6,7 +6,8 @@ date: 2026-08-01
 target: spine
 relevance: all — any LEME product whose UI, marketing site or store listing references a third-party platform or vendor
 status: pending
-reliability-target: L3
+reliability-target: L4
+gate: fdd-field
 hook: Integrating with a vendor grants no right to their logo. Their NAME as text is usually fine (nominative use); their MARK almost never is — and the distinction is stated on the vendor's own trademark page, so it takes two minutes to check.
 ---
 

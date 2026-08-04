@@ -6,7 +6,8 @@ date: 2026-08-03
 target: profile:swift
 relevance: swift — any Swift code wrapping an Objective-C API in do/catch, especially a security check
 status: pending
-reliability-target: L3
+reliability-target: L2
+gate: build-setting:-warnings-as-errors
 hook: `try` on a non-throwing Objective-C method compiles with only a warning, so a do/catch around it reads as an enforcement check while the catch can never execute. BootIt carried two of these around `NSXPCConnection.setCodeSigningRequirement` — one logging "rejected a connection failing the signing requirement", one throwing "the helper failed its signature check", neither reachable.
 ---
 

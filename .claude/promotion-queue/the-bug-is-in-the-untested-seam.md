@@ -6,7 +6,8 @@ date: 2026-08-04
 target: spine
 relevance: all — any codebase with a well-tested pure core reached through glue, which is most of them
 status: pending
-reliability-target: L2
+reliability-target: L3
+gate: test:mac/Tests/BootItTests/CopyIngestConcurrencyTests.swift
 hook: When a heavily-tested pure core is fed by an untested seam, the bug is in the seam. BootIt's copy reducer had 14 tests and a replay harness; the glue delivering samples to it had none — and that glue mutated the reducer from the XPC delivery thread and the worker queue at once. The review brief pointed at the scariest-looking code (an IOKit registry walk, which was flawless) and the defect was in the plain-Swift plumbing nobody had thought to look at.
 ---
 

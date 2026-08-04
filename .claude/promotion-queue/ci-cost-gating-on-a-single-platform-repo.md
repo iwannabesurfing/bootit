@@ -6,7 +6,8 @@ date: 2026-08-03
 target: spine
 relevance: all — any repo whose only supported platform is an expensive CI runner (macOS, Windows, GPU)
 status: pending
-reliability-target: L2
+reliability-target: L4
+gate: fdd-field
 hook: "Gate the expensive platform build to release events" is the right CI-cost rule for a repo where the expensive runner is one leg of several. It is the wrong rule where that runner is the ONLY platform — gating removes the default branch's sole pre-release signal. The lever that actually exists there is paths-ignore for doc-only commits.
 ---
 

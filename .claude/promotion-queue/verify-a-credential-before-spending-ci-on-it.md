@@ -6,7 +6,8 @@ date: 2026-08-03
 target: spine
 relevance: all — any workflow where a human supplies a certificate, key or credential file for CI to consume
 status: pending
-reliability-target: L2
+reliability-target: L4
+gate: fdd-field
 hook: Verify a supplied credential LOCALLY before spending a CI run proving it wrong. BootIt's Developer ID certificate arrived first as a `.cer` with no private key, then twice as the wrong identity (Apple Distribution rather than Developer ID Application); `openssl pkcs12 -nokeys` named the identity in under a second each time, where the pipeline would have burned a full macOS build to say the same thing far less clearly.
 ---
 

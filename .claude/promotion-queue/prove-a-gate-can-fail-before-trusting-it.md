@@ -6,7 +6,8 @@ date: 2026-08-04
 target: spine
 relevance: all — any repo adding a CI step, a lint rule, a sanitizer, a smoke test or any other automated check
 status: pending
-reliability-target: L3
+reliability-target: L4
+gate: fdd-field
 hook: A CI gate must be proven to FAIL before it is trusted to pass. BootIt added `swift test --sanitize=thread` and verified both directions first — restoring a known race to confirm exit 1 with 8 warnings, then the fixed tree to confirm exit 0 — because the same repo had already shipped a release workflow whose signing steps silently skipped and reported success. A step that cannot go red is worse than no step: it converts an unchecked property into one everybody believes is checked.
 ---
 

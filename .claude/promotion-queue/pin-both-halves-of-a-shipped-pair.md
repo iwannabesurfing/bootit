@@ -6,7 +6,8 @@ date: 2026-08-03
 target: spine
 relevance: all — any project shipping a client and a server (daemon, helper, sidecar, worker) inside one artefact
 status: pending
-reliability-target: L2
+reliability-target: L4
+gate: fdd-field
 hook: When a fix spans a client and a server that ship inside ONE bundle, a verification run proves nothing unless both sides are pinned to the same build — and that has to be measured, not assumed. BootIt spent an hour diagnosing a "failure" that was a 10:36 app talking to a 10:56 helper across a changed XPC method signature; the mismatch was invisible until the app's process start time was compared against the bundle's mtime.
 ---
 

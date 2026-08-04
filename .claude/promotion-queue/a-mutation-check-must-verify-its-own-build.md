@@ -6,7 +6,8 @@ date: 2026-08-04
 target: spine
 relevance: all — any project using mutation testing to prove a test bites, which is the standard way of proving it
 status: pending
-reliability-target: L2
+reliability-target: L4
+gate: fdd-field
 hook: A mutation check that does not assert the mutated tree compiles cannot tell a broken mutation from a surviving one. BootIt's harness reported SURVIVES for a mutation whose patch had silently failed to apply — which reads as "this test does not bite" and would have justified deleting a test that bites perfectly well. Every survival result from an unverified harness is worthless, and it fails in the direction that destroys good tests.
 ---
 

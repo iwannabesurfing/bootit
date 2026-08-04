@@ -6,7 +6,8 @@ date: 2026-08-04
 target: spine
 relevance: all — any language whose compiler does not flag unused declarations, which is most of them for public/protocol surface
 status: pending
-reliability-target: L2
+reliability-target: L4
+gate: fdd-field
 hook: Deleting a caller is not deleting the dead code. BootIt removed `currentHelperVersion()` as one-occurrence dead code in the same commit that left standing the XPC method it called — under a freshly written comment asserting a fallback capability nothing implemented. A comment describing an intention is indistinguishable from a comment describing behaviour, and it converts dead code into dead code with an alibi.
 ---
 

@@ -6,7 +6,8 @@ date: 2026-08-04
 target: spine
 relevance: all — any project running a multi-model triangulation gate (C-TRIMODEL) and recording its output as a basis for design decisions
 status: pending
-reliability-target: L2
+reliability-target: L4
+gate: fdd-field
 hook: A prediction that survives three independent models can still be false, and only measurement settles it. BootIt's tri-model gate had two of three legs predict that `proc_pid_rusage` counts buffer-cache writes and would race to payload size in ~2 minutes then freeze; the first instrumented run showed it tracking the device counter to within 1.2% across 29 minutes. The decision that prediction supported was still right, for a different reason — but "two of three models agreed" had been recorded as evidence when it was consensus, and consensus among models trained on overlapping data is not independent confirmation.
 ---
 

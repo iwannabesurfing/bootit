@@ -6,7 +6,8 @@ date: 2026-08-03
 target: spine
 relevance: all — any session that repairs a code path which had never successfully executed
 status: pending
-reliability-target: L3
+reliability-target: L4
+gate: fdd-field
 hook: Repairing a dead code path makes everything downstream of it reachable for the first time, and none of that has ever been reviewed — not by a user, not by a reviewer, often not by its author. Budget a look at the states the fix newly unlocks; they are the least-inspected code in the repo.
 ---
 

@@ -6,7 +6,8 @@ date: 2026-08-03
 target: spine
 relevance: all — any project with a design gate that fires on "hard to reverse", and any decision whose test loop is slow or human-gated
 status: pending
-reliability-target: L2
+reliability-target: L4
+gate: fdd-field
 hook: A design gate that only ever fires when the user demands it has already failed. BootIt's progress indicator passed all three C-TRIMODEL tests and the agent queued a fourth patch instead of flagging it. The missed tell: "hard to reverse" should be read as **how expensive is falsification**, because a decision that cannot be cheaply tested will ship wrong repeatedly — this one shipped wrong three times.
 ---
 

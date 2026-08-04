@@ -6,7 +6,8 @@ date: 2026-08-04
 target: spine
 relevance: all — any project where an agent writes a session log, memory file or handover doc that a later session reads as ground truth
 status: pending
-reliability-target: L2
+reliability-target: L4
+gate: fdd-field
 hook: An inference written into a session log becomes the next session's fact, and outranks the memory that recorded the truth. BootIt logged that six CI signing secrets "were gone", inferring it from a notarised DMG that had actually been signed locally and uploaded by hand four seconds before CI started. A task was queued to investigate a disappearance that never happened, and the memory written at the time — which was correct — lost to the more recent, more confident, wrong entry.
 ---
 

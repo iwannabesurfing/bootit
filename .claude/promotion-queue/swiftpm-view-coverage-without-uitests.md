@@ -6,7 +6,8 @@ date: 2026-08-01
 target: profile:swift
 relevance: any Swift app built as a SwiftPM package rather than an Xcode project
 status: pending
-reliability-target: L2
+reliability-target: L3
+gate: test:mac/Tests/BootItTests/FlowTests.swift
 hook: SwiftPM supports no XCUITest target, so "add UI tests" is not available — the coverage that matters comes from moving navigation and enablement logic OUT of View bodies, where it was never reachable in the first place.
 ---
 

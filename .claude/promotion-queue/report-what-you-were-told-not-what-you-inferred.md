@@ -6,7 +6,8 @@ date: 2026-08-03
 target: profile:swift
 relevance: swift — Apple-platform apps surfacing failures from a daemon, XPC peer, or any out-of-process component
 status: pending
-reliability-target: L2
+reliability-target: L3
+gate: test:mac/Tests/BootItTests/EjectFailureTests.swift
 hook: An app that decides what a failure MEANS instead of reporting what it was TOLD gives confident wrong guidance. BootIt asserted "USB access blocked" for a probe that never reached the helper, and discarded the daemon's own NSError message in two separate branches — sending the user to change a TCC setting that was never implicated. Three instances of one defect in a single session, each found by reading the screen against the code that produced it.
 ---
 

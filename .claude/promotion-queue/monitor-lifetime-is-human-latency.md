@@ -6,7 +6,8 @@ date: 2026-08-03
 target: spine
 relevance: all — any agent session that instruments a machine to capture evidence from a human-driven run
 status: pending
-reliability-target: L2
+reliability-target: L4
+gate: fdd-field
 hook: When an agent instruments for a verification a HUMAN will perform, the monitor's lifetime must be sized to human latency (hours), not agent latency (minutes). A one-hour process monitor expired three hours before the user started the run, and the timeline it existed to capture was lost — the failure is silent, because an expired monitor and an idle one look identical.
 ---
 

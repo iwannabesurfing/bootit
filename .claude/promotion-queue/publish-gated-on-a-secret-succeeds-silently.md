@@ -6,7 +6,8 @@ date: 2026-08-03
 target: spine
 relevance: all — any CI pipeline whose publish/deploy step is conditional on a credential being present
 status: pending
-reliability-target: L2
+reliability-target: L4
+gate: fdd-field
 hook: A release job whose publish step is gated on `if: <secret> != ''` reports SUCCESS while publishing nothing. BootIt's six signing secrets had been deleted at some point between releases, so tagging would have built, signed ad-hoc, skipped notarisation, uploaded a 7-day artifact and finished GREEN with no release — a successful-looking run that ships nothing.
 ---
 

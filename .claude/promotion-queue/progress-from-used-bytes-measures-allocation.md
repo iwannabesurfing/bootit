@@ -6,7 +6,8 @@ date: 2026-08-03
 target: spine
 relevance: all — any long copy, download, restore or export whose progress is inferred from a destination's size
 status: pending
-reliability-target: L2
+reliability-target: L3
+gate: test:mac/Tests/BootItTests/RecordedRunTests.swift
 hook: A progress bar driven from filesystem used-bytes measures ALLOCATION, not data. BootIt's ring reached 95% in four minutes and then did not move for the remaining 33 of a 38-minute write, while the device took a steady 535 MB/min throughout — the filesystem reports the allocation up front, and both `used` and `avail` then freeze. Cumulative device I/O counters tracked the real write the whole time.
 ---
 

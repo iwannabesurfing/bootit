@@ -6,7 +6,8 @@ date: 2026-08-04
 target: spine
 relevance: all — any session that writes prose describing measured behaviour, or turns a recorded dataset into tests
 status: pending
-reliability-target: L3
+reliability-target: L4
+gate: fdd-field
 hook: A test written from assumption fails in seconds where the same assumption in prose survives for months. Turning BootIt's first recorded run into assertions immediately refuted two beliefs the agent had already stated confidently in a report — that filesystem used-bytes goes *blind* mid-run (it goes static; only 16 of 865 samples were nil) and that it stays frozen to the end (it ticks once at unmount). Both had been written as observations after glancing at two samples.
 ---
 

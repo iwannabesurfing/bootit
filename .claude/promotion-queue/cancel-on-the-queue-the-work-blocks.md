@@ -7,6 +7,7 @@ target: spine
 relevance: all — any codebase with a long-running operation on a serial queue and a user-facing cancel
 status: pending
 reliability-target: L3
+gate: test:mac/Tests/BootItTests/CancellationTests.swift
 hook: A cancellation dispatched onto the same serial queue the work occupies can never run — it queues behind the operation it exists to stop. The UI's synchronous "Cancelling…" line still appears, so the button looks wired. Dispatch cancellation anywhere except the queue being cancelled.
 ---
 

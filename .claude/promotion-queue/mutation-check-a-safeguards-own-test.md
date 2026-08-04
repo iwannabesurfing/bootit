@@ -6,7 +6,8 @@ date: 2026-08-03
 target: spine
 relevance: all — any session that adds a defensive safeguard against framework or platform behaviour
 status: pending
-reliability-target: L3
+reliability-target: L4
+gate: fdd-field
 hook: A test written alongside a defensive safeguard must be mutation-checked by deleting the safeguard. If the test still passes, the safeguard is guarding nothing and the test is asserting the framework's behaviour, not yours — both should go, and the comment that justified them is a falsehood you were about to leave in the codebase.
 ---
 

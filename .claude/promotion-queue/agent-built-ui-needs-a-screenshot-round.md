@@ -6,7 +6,8 @@ date: 2026-08-01
 target: spine
 relevance: all — any session where an agent builds or restructures user-facing UI it cannot see
 status: pending
-reliability-target: L3
+reliability-target: L4
+gate: fdd-field
 hook: Green tests plus a clean build say nothing about whether a screen is usable. Four presentation defects survived 52 passing tests and were visible in the first ten seconds a human ran the app — so budget one screenshot round BEFORE calling UI work done, and say plainly which claims are intent rather than observation.
 ---
 
