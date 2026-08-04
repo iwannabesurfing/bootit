@@ -1,5 +1,153 @@
 # BootIt — session log
 
+## 2026-08-05 — both stale questions closed, and the fix for one was wrong
+
+**Commits:** _(pending — see end of section)_
+
+**CI:** _(pending)_
+**Local:** receipt `.claude/receipts/bootit-green.build-test-lint.receipt.txt` — **241 tests, 0
+failures** (233 at session start), 0 SwiftLint violations across 48 files, **0 compiler warnings**,
+full suite ThreadSanitizer-clean, design-index lint green. From `swift package clean`, with
+`-Xswiftc -warnings-as-errors`. **All 11 mutations re-run and all 11 bite**, after a refactor that
+moved every one of their anchors.
+
+### The headline
+
+The two items that had fallen off the record for four sessions were both closed. Neither closed the
+way it was written down.
+
+- **"Is `SMAppService` registration admin-gated? ~5 min on a test account."** It needed no test
+  account. Apple states the rule in `SMAppService.h`, on disk in the SDK.
+- **"Does Xcode render `#Preview` for a SwiftPM executable target?"** It needed a human, briefly —
+  but **the fix queued alongside it was wrong**, and that was falsifiable for free.
+
+### Registration was never the gate
+
+From `SMAppService.h`, the discussion for `registerAndReturnError`:
+
+> If the service corresponds to a LaunchDaemon, the LaunchDaemon will not be bootstrapped until
+> **an admin** approves the LaunchDaemon in System Settings.
+
+So the question as filed has a misleading answer. `register()` succeeds for anybody and parks the
+service in `.requiresApproval`. The **approval** is the gate. A standard account can build a Windows
+stick start to finish — that path writes unprivileged and registers no daemon — and **cannot
+complete the macOS path unaided**.
+
+Worse, `ensureReady()` sits *after* the download in `runMac`, so that account would meet the wall
+after fetching ~14 GB. And all three strings for that moment said *"**your** approval"*, naming
+nothing they would have to go and find.
+
+Fixed: `AdminRights` reads `admin` group membership; `InstallPreflight` gains a third pre-erase
+question beside app-replaced and USB-access; a warning banner appears at drive selection, before the
+download, and suppresses the "macOS will ask **you**" note so the screen cannot contradict itself.
+The three strings and the README table now name the administrator requirement.
+
+**It warns rather than blocks.** "An admin approves" does not say whether System Settings offers a
+standard user an auth sheet an administrator could fill in beside them. Refusing to start would
+claim an answer the documentation does not give.
+
+The reading is pinned in both directions **without a second account** — `/etc/group` ships
+`admin:*:80:root`, `nobody:*:-2:` and `daemon:*:1:root`, so root is an administrator and the service
+accounts are not, on this machine and on a CI runner alike. Three mutations, all biting: reading the
+primary group instead of memberships, treating a nil reading as a denial, and warning on the Windows
+path.
+
+### The queued preview fix would not have worked
+
+The plan of record was "a library target plus a thin executable — a `Package.swift` change". Before
+paying for it — 21 test imports and 11 mutation anchors — a five-line probe view was dropped into
+`BootItShared`, which is **already a library target**, and previewed.
+
+Same error. *Still naming the executable target*, for a file that was not in it.
+
+| View's target | Scheme | Renders? |
+|---|---|---|
+| executable | `BootIt-Package` | no |
+| **library** | `BootIt-Package` | **no** — error still names the executable |
+| **library** | **`BootItKit`** | **yes** |
+
+Xcode resolves the preview **host from the scheme**, not from the target the view lives in. The
+package scheme contains every target, finds the executable, and tries to host previews in it. A
+library target only helps once a scheme exists with no executable in it — which needs a declared
+library **product**, which the queued plan did not mention.
+
+So the restructure was done, correctly this time: `Sources/BootIt` → `BootItKit` (library, declared
+as a product), `Sources/BootIt` reduced to a thin `@main` over `BootItMain.run()`. ~40 fixtures that
+had **never rendered once** now render.
+
+Two confounds were cleared first and neither was a verdict: the destination was an iPhone on a
+macOS-only package, and a brand-new target reported `"Probe.swift" not found in any targets` — an
+answer about Xcode's index, not about previews. Worth naming, because either could have been written
+down as the answer.
+
+### Decisions
+
+- **Warn, do not block, a standard account.** The unknown is real and blocking would overstate it.
+- **`AdminRights` returns nil for "could not establish", never false.** A failed reading rendered as
+  a warning would tell administrators to go and find an administrator.
+- **`Sources/BootIt` holds exactly one file, forever.** Anything added there is unpreviewable and
+  untestable by construction. Said so in the file.
+- **All four products declared explicitly.** Naming any product suppresses the implicit ones, and
+  `build.sh` copies both binaries out of the bin path — verified by running it, not by reading it.
+- **Two design-index rows added rather than left as code comments**, with the honest-gaps section
+  updated to distinguish them: both were measured or quoted from a primary source before being acted
+  on, and the evidence sits at the call site. Not a design document, but falsifiable.
+
+### Issues discovered
+
+- **A queued lesson was partly wrong and is now corrected in place.**
+  `swiftpm-view-coverage-without-uitests` recommended `#Preview` fixtures and checked that they
+  *compile*. Compiling was never the question — BootIt's forty compiled for four sessions and
+  rendered zero times. Corrected, linked to the new candidate, and kept rather than deleted, because
+  the extraction advice around it still holds.
+- **`swiftlint lint --strict` from the repo root lints 75 files and reports 31 violations**; from
+  `mac/` it lints 47 and reports none. The config's `included: Sources` resolves against the cwd, and
+  when it matches nothing SwiftLint falls back to linting everything below. CI sets
+  `working-directory: mac`, so this is not a live gap — but the failure is silent in the wrong
+  direction, and anyone running the documented command from the wrong directory gets 31 errors that
+  are not theirs. **Not fixed:** scoping `included` to `mac/Sources` would break the CI invocation.
+  Recorded rather than half-fixed.
+
+### Test results
+
+241 tests, 0 failures (233 at session start). SwiftLint strict: 0 violations, 48 files. 0 compiler
+warnings from a fully cleaned tree, enforced. Full suite TSAN-clean. `build.sh` run end to end: the
+app assembles, is arm64-only, embeds the helper, and the release binary contains **zero** preview
+symbols — checked against the binary's own timestamp, because a stale `dist/` would have answered
+just as confidently.
+
+**Eleven mutation checks, all biting** — the three new ones plus the eight existing, every anchor of
+which moved in this session's refactor. That is the case `bin/mutation-check.py` was committed for
+last session, arriving one session later: re-running the corpus after a move was one command instead
+of a re-derivation.
+
+Not covered by tests, and said so: whether System Settings offers a standard user an authentication
+sheet for the Login Items switch. That needs a second account and is the only part of the
+administrator question a test cannot reach.
+
+### Next session should start with
+
+1. **Nothing carried.** Both multi-session questions are closed, no code is queued, the design index
+   has rows for both new decisions, and the queue validates clean.
+2. **The one remaining unknown, if it is ever worth an account:** does a standard user get an auth
+   sheet on the Login Items switch, or is it simply unavailable? It changes the warning's wording
+   from "someone who administers this Mac has to approve it" to "an administrator can approve it
+   here, now" — a real improvement, and not a blocker.
+3. **v3.3.0 is still what GitHub ships**, and this session changed user-facing copy and the package
+   layout. A release is the next thing with outside consequences.
+4. **`AppModel`'s pipeline is still untested as sequencing** — recorded two sessions ago as a
+   deliberate skip with reasoning. The trigger should be a bug in the sequencing, not a line count.
+
+[promote-spine: "human-gated" is a claim about a method, not about a question — once written down it reads as a verdict and the item stops being reconsidered; ask whether a primary source already answers it, and whether the PLAN attached to it rests on a premise a cheap probe could falsify first]
+
+[promote-profile:swift: Xcode resolves a SwiftUI preview's HOST from the selected scheme, not from the target the view lives in — so moving views into a library target does nothing on its own; a package needs a declared library PRODUCT so a scheme exists containing no executable, and the error keeps naming the executable target until it does]
+
+[promote-profile:swift: `SMAppService.daemon(...).register()` is not admin-gated and succeeds for a standard user — it parks the service in `.requiresApproval`, and Apple's header says only an admin can approve it, so an app that only checks whether registration failed reports success to a user who can never finish]
+
+[promote-spine: when a warning depends on reading the environment, return nil for "could not establish" and never false — a failed reading rendered as a finding tells administrators to go and find an administrator, and the wrong direction to fail is the confident one]
+
+[promote-spine: verify a build artefact against its own timestamp before believing what you read out of it — a relative path to `dist/` answers just as confidently from a stale bundle as from the one just built]
+
 ## 2026-08-04 (session 3) — the carried item, and the queue that could never have drained
 
 **Commits:** `9290bfe` → `49e0b37` (6 this session), all pushed.

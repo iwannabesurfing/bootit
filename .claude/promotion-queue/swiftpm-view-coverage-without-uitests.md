@@ -44,8 +44,17 @@ to break is a suite of unknown value.
 
 Genuine rendering — does the card look right, does dark mode work — stays uncovered.
 **Snapshot testing is the wrong reach here:** it renders differently on a dev Mac than on a
-`macos-15` runner and goes flaky on the first OS divergence. Use `#Preview` fixtures (which
-do compile at a macOS 13 deployment target) plus one human screenshot round.
+`macos-15` runner and goes flaky on the first OS divergence. Use `#Preview` fixtures plus
+one human screenshot round.
+
+**Correction (2026-08-05):** as originally written this section said the fixtures "do
+compile at a macOS 13 deployment target", and left the impression that compiling was the
+thing to check. It is not. BootIt's ~40 fixtures compiled for four sessions and **never
+rendered once** — on a SwiftPM package, previews fail unless a scheme exists with no
+executable target in it, which needs a declared library product, not just a library target.
+See [[preview-host-comes-from-the-scheme]]. Adopt this lesson's extraction advice, but do
+not adopt "add `#Preview` fixtures" as though it were free: verify one renders before
+writing forty.
 
 ## Applies when
 
