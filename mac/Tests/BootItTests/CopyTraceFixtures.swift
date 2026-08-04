@@ -25,7 +25,18 @@ import Foundation
 /// freezes on this data and the new one does not. That property is fixed by the
 /// measured points, not by the interpolation between them.
 ///
-/// Replace this with a recorded `.jsonl` the moment an instrumented run exists.
+/// **Superseded as evidence, 2026-08-04.** A real instrumented run now exists —
+/// `Fixtures/copy-run-2026-08-04.jsonl`, replayed by `RecordedRunTests` — and it
+/// is what the claims about copy behaviour are now made from. The recorded run
+/// agrees with the reconstruction's shape and corrects two of its numbers: the
+/// device/payload ratio is 1.048 rather than 1.058 once the baseline is measured
+/// rather than assumed, and `df` freezes at 18% of the way through rather than
+/// the ~11% this interpolation implies.
+///
+/// Kept, deliberately, for the other job it does: `run(interval:)` is a cheap
+/// synthetic sample stream, used by the seam and concurrency tests that need
+/// *some* plausible trace rather than *the* trace. Using an 865-sample recording
+/// to feed a race-condition test would be slower and no more truthful.
 enum CopyTraceFixtures {
 
     static let runDuration: Double = 2233

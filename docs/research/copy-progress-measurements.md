@@ -17,10 +17,10 @@ The bar in §D1 requires slow flash, fast flash, external SSD and a hub. None of
 
 | # | Question | Status |
 |---|---|---|
-| 1 | Do device `Bytes (Write)` and process `ri_diskio_byteswritten` diverge as Gemini predicts? *(settles D2)* | **OPEN** — needs an instrumented run; both columns are now recorded |
-| 2 | Does the device counter over a full run land within a few percent of the payload? *(settles whether a denominator exists)* | **PARTIAL** — see M1 |
-| 3 | Is the 33-minute tail transfer or flush? | **OPEN** |
-| 4 | Do the counters survive device re-enumeration and sleep mid-run? *(ChatGPT's catch)* | **OPEN** — handled defensively regardless, see M2 |
+| 1 | Do device `Bytes (Write)` and process `ri_diskio_byteswritten` diverge as Gemini predicts? *(settles D2)* | **CLOSED — prediction falsified.** They tracked each other all run, ending 1.2% apart. See M4. |
+| 2 | Does the device counter over a full run land within a few percent of the payload? *(settles whether a denominator exists)* | **CLOSED** — 1.048 with a measured baseline. See M4; baseline in M3, earlier estimate in M1. |
+| 3 | Is the 33-minute tail transfer or flush? | **CLOSED — transfer.** 1.5 GB written at 9.2 MB/s *after* the tool printed 100%. See M4. |
+| 4 | Do the counters survive device re-enumeration and sleep mid-run? *(ChatGPT's catch)* | **OPEN** — handled defensively regardless, see M2. Not exercised by M4: no sleep, no re-enumeration. |
 
 ---
 
@@ -79,6 +79,104 @@ survived every unit test written at the time.
 load. A busier volume, or a different filesystem, will have a different floor — but the floor
 only has to sit between "journal noise" and "a working copy", and those are four orders of
 magnitude apart.
+
+---
+
+## M3 — what the counter reads on a freshly attached drive
+
+**2026-08-04, session 2.** The stick from M1/M2 was unplugged and plugged back in. Read once,
+immediately, before anything was asked to write to it.
+
+| Reading | Value |
+|---|---|
+| `Bytes (Write)` | **871,936 B** (~0.87 MB) |
+| `Operations (Write)` | **59** |
+
+**Reading: a freshly attached drive does not start at zero.** Mounting it is itself a write —
+journal replay and the volume's own mount bookkeeping — and `IOBlockStorageDriver`'s counter is
+per-device and cumulative from attach, with no process attribution to separate that from ours.
+
+**This is question 2's baseline, measured rather than assumed**, which is the gap M1 named as
+the reason its own confidence was only LOW-MEDIUM: *"the baseline at run start is assumed, not
+measured."* It is no longer assumed.
+
+The magnitude is not the point — 0.87 MB against a ~21 GB run is 0.004%, and rounds away.
+**The shape is the point.** Code that assumed a zero origin would be wrong by whatever the mount
+happened to cost, and that quantity is a property of the drive and its filesystem state, not a
+constant anybody can hard-code. A drive that was not cleanly unmounted has a journal to replay
+and will read higher. Sampling the baseline at the start of the run is therefore load-bearing,
+and `CopyProgressModel` subtracting it is not defensive tidiness — two mutation checks pin it.
+
+**Confidence: HIGH** for the claim being made (the origin is non-zero and must be sampled).
+**LOW** for the specific figure, which is one drive, one filesystem, one mount, and should not
+be treated as a typical value.
+
+---
+
+## M4 — the first instrumented run, end to end
+
+**2026-08-04, session 2.** A complete `createinstallmedia` write to the same 61.5 GB stick,
+recorded by the shipping app with no special build. **865 samples over 28.8 minutes.** The trace
+is committed as `mac/Tests/BootItTests/Fixtures/copy-run-2026-08-04.jsonl` and replayed by
+`RecordedRunTests`, so every figure below is now a test rather than a note.
+
+| Quantity | Value |
+|---|---|
+| Duration of the copy phase | 1728 s (28.8 min) |
+| Device bytes written (baseline subtracted) | 21.069 GB |
+| Process bytes (`proc_pid_rusage`) | 20.829 GB |
+| Payload landed (`statfs`) | 20.105 GB |
+| device / payload | **1.048** |
+| device / process | **1.012** |
+
+### Question 1 — falsified
+
+The tri-model D2 prediction, from two of three legs, was that `ri_diskio_byteswritten` counts
+writes into the unified buffer cache: it would sprint to the payload size in about two minutes
+and then freeze, reproducing the `df` failure one layer up.
+
+**It did not.** It stayed within ~20% of the device counter from the moment bulk copying began
+and finished 1.2% below it. On this hardware it would have worked as a numerator.
+
+**This does not reopen the percentage.** The reason the app shows none is that the *denominator*
+is not knowable before the run — `createinstallmedia` does not announce how much it intends to
+write, and the amount that lands is not the amount the device writes. A second well-behaved
+numerator supplies no denominator. The decision stands; one of its supporting arguments does not,
+and saying so is the point of having measured it.
+
+**Confidence: HIGH** for this device and this macOS build. **One run, one drive** — the
+prediction may well hold on hardware where the cache behaves differently, which is exactly why
+the column is still recorded and still never displayed.
+
+### Question 2 — 1.048, and the direction is the dangerous one
+
+M1 estimated 1.058 from an assumed baseline; with the baseline measured (M3) it is 1.048. Either
+way the device writes ~5% more than lands, so a payload-sized denominator reaches 100% with
+about 5% of the work outstanding. Gemini's 95% clamp was load-bearing for that design. The
+shipped design needs no clamp because it claims no percentage.
+
+### Question 3 — transfer, not flush
+
+`createinstallmedia` printed `Copying to disk: 0%… 100%` at **1562 s** and the run ended at
+**1728 s**. In those 166 seconds the drive wrote **1519 MB at 9.2 MB/s** — a working rate, not a
+flush and not a hang.
+
+So the tool's own "100%" had a sixteenth of the writing still to come. Any bar driven from the
+tool's output would have sat at 100% for nearly three minutes.
+
+### What the filesystem column did — the bug, recorded at last
+
+`volumeUsedBytes` reaches **99.9% of its final value at 310 s**, which is **18% of the way
+through** the run. At that instant the device had written **12.7%** of what it would write and
+**23.6 minutes remained**. It then does not move for over fifteen minutes.
+
+This is the defect that shipped three times, and this is the first time it has been captured
+rather than inferred. It is not a rounding or tuning problem and no clamp rescues it: `df` is
+measuring something that finishes long before the drive does.
+
+**The 20.8-minute silence** between 309 s and 1562 s — `createinstallmedia` emitting nothing at
+all — is the stretch the feature exists for. The device counter moved in 612 of 625 samples
+across it, so the liveness display had something true to say for essentially all of it.
 
 ---
 
