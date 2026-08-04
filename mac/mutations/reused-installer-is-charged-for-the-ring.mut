@@ -1,0 +1,7 @@
+# The bar starts half-way along for a download that never happened.
+filter: WriteBase
+file: Sources/BootIt/RunPlan.swift
+--- old ---
+        case .macos:   return installerWasReused ? 0 : 0.5
+--- new ---
+        case .macos:   return 0.5

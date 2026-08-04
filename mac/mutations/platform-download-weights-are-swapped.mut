@@ -1,0 +1,7 @@
+# One platform's bar crawls and the other jumps.
+filter: WriteBase
+file: Sources/BootIt/RunPlan.swift
+--- old ---
+        case .windows: return 0.55
+--- new ---
+        case .windows: return 0.5

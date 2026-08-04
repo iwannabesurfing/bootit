@@ -1,0 +1,7 @@
+# A locally-picked ISO or installer app is billed for a fetch that did not occur.
+filter: WriteBase
+file: Sources/BootIt/RunPlan.swift
+--- old ---
+        guard source == .download else { return 0 }
+--- new ---
+        guard source == .download || source == .local else { return 0.5 }

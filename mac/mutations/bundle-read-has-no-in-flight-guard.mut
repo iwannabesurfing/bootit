@@ -1,0 +1,7 @@
+# Lets activations pile up blocking stats behind one stalled mount.
+filter: BundleReadingLatency
+file: Sources/BootIt/AppModel.swift
+--- old ---
+guard !self.preflight.appWasReplaced, !self.bundleReadingInFlight else { return }
+--- new ---
+guard !self.preflight.appWasReplaced else { return }

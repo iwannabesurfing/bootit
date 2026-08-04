@@ -1,0 +1,9 @@
+# Reports `createinstallmedia exited 15` — the SIGTERM we sent — as a fault, blaming
+# the user for pressing the button we offered them.
+filter: RunOutcome
+file: Sources/BootIt/RunPlan.swift
+--- old ---
+            message: "Stopped before the installer was finished, so the drive is not "
+                   + "bootable. Start over to make one.",
+--- new ---
+            message: describedError,

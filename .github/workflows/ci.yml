@@ -84,6 +84,21 @@ jobs:
       - name: Test (ThreadSanitizer)
         run: swift test --sanitize=thread
 
+      # The harness that certifies every "this test bites" claim in this repo.
+      # Only the self-test runs here, not the corpus: eight mutations is eight
+      # builds plus eight filtered test runs on a runner billing at 10x, and the
+      # corpus is the thing you run deliberately when tests change. The self-test
+      # is two builds and one test run, and it guards the property that makes
+      # every corpus result meaningful.
+      #
+      # It checks both directions, because both failures are silent. A harness
+      # that reports SURVIVES for a patch that never applied sends you off to
+      # write a test that already exists; a harness that can only report BITES
+      # certifies untested code as tested and has no symptom at all.
+      - name: Mutation harness self-test
+        working-directory: .
+        run: ./bin/mutation-check.py --self-test
+
       - name: SwiftLint (strict)
         run: |
           brew install swiftlint
