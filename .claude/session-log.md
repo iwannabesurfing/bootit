@@ -2,10 +2,13 @@
 
 ## 2026-08-05 (session 2) — v3.4.0 shipped, and the account nobody needed to create
 
-**Commits:** `031b7fc` (bump) → this log entry. Tag `v3.4.0` pushed.
+**Commits:** `031b7fc` (bump) → `c98933c` (this log entry), both pushed. Tag `v3.4.0` pushed.
 
-**CI:** green, SHA-anchored to `031b7fc` (`headSha` verified equal to `git rev-parse HEAD`).
-Run `30959694084` — all eight steps ran, **none skipped**. Design index green (`30959694082`).
+**CI:** green, SHA-anchored to `031b7fc` — run `30959694084`, all eight steps ran, **none skipped**,
+`headSha` verified equal to `git rev-parse HEAD` at the moment of tagging. The log commit is
+docs-only, so path filtering runs Design index alone on it: run `30961618125`, green, `headSha`
+`c98933c`. That is the CI-cost gating working as intended, not a skipped check — no Swift source
+changed after `031b7fc`.
 **Release:** run `30961284215` — all twelve steps green, including the tag↔`Info.plist` check,
 the Developer ID import and notarisation.
 **Local:** receipt `.claude/receipts/bootit-green.build-test-lint.receipt.txt` — **241 tests, 0
