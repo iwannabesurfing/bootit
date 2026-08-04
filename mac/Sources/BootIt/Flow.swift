@@ -100,7 +100,7 @@ extension AppModel {
     /// Whether the source step has everything it needs to continue.
     var isSourceValid: Bool {
         guard source == .local else { return true }   // download is always valid
-        return platform == .windows ? !localISOPath.isEmpty : !macAppPath.isEmpty
+        return platform == .windows ? !localISOPath.isEmpty : !catalog.macAppPath.isEmpty
     }
 
     /// The primary button's title for the current step.
@@ -172,7 +172,7 @@ extension AppModel {
 
         case .source:
             guard source == .local else { return .advance(to: .options) }
-            let path = platform == .windows ? localISOPath : macAppPath
+            let path = platform == .windows ? localISOPath : catalog.macAppPath
             guard !path.isEmpty, fileExists(path) else {
                 return .block(message: platform == .windows
                               ? "Choose a valid .iso file first."
@@ -197,12 +197,12 @@ extension AppModel {
     func apply(_ decision: FlowDecision) {
         switch decision {
         case .advance(let destination, let refreshing):
-            catalogError = nil
+            catalog.error = nil
             if destination == .source, platform == .macos { loadInstalledMacApps() }
             step = destination
             if refreshing { refreshDisks() }
         case .block(let message):
-            catalogError = message
+            catalog.error = message
         case .confirmErase:
             isConfirmingErase = true
         case .noop:
@@ -223,7 +223,7 @@ extension AppModel {
 
     func goBack() {
         guard let destination = backDestination else { return }
-        catalogError = nil
+        catalog.error = nil
         step = destination
     }
 }

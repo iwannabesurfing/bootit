@@ -45,12 +45,14 @@ enum PreviewModel {
         let model = AppModel()
         model.platform = .windows
         model.step = .options
-        model.loadingCatalog = loading
-        model.catalogError = error
+        model.catalog.isLoading = loading
+        model.catalog.error = error
         if !loading && error == nil {
-            model.editions = [CatalogItem(id: "3321", name: "Windows 11 Home/Pro")]
-            model.languages = [CatalogItem(id: "1", name: "English (United States)"),
-                               CatalogItem(id: "2", name: "English (United Kingdom)")]
+            model.catalog.editions = [CatalogItem(id: "3321", name: "Windows 11 Home/Pro")]
+            model.catalog.languages = [
+                CatalogItem(id: "1", name: "English (United States)"),
+                CatalogItem(id: "2", name: "English (United Kingdom)")
+            ]
         }
         return model
     }
@@ -59,9 +61,9 @@ enum PreviewModel {
         let model = AppModel()
         model.platform = .macos
         model.step = .options
-        model.macInstallers = sampleMacInstallers
-        model.selectedMacGroupTitle = "macOS Tahoe"
-        model.selectedMacBuild = "25C61"
+        model.catalog.macInstallers = sampleMacInstallers
+        model.catalog.selectedMacGroupTitle = "macOS Tahoe"
+        model.catalog.selectedMacBuild = "25C61"
         return model
     }
 
@@ -175,11 +177,11 @@ enum PreviewModel {
         model.step = .done
         model.progress = 1
         if platform == .macos {
-            model.macInstallers = sampleMacInstallers
-            model.selectedMacGroupTitle = "macOS Tahoe"
-            model.selectedMacBuild = "25C61"
+            model.catalog.macInstallers = sampleMacInstallers
+            model.catalog.selectedMacGroupTitle = "macOS Tahoe"
+            model.catalog.selectedMacBuild = "25C61"
         } else {
-            model.editions = [CatalogItem(id: "3321", name: "Windows 11 Home/Pro")]
+            model.catalog.editions = [CatalogItem(id: "3321", name: "Windows 11 Home/Pro")]
         }
         return model
     }

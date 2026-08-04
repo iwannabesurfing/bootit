@@ -9,14 +9,14 @@ struct OptionsStepView: View {
         VStack(alignment: .leading, spacing: 16) {
             if model.platform == .macos { macOptions } else { windowsOptions }
 
-            if model.loadingCatalog {
+            if model.catalog.isLoading {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text("Contacting servers…")
                 }
                 .foregroundStyle(.secondary)
             }
-            if let error = model.catalogError {
+            if let error = model.catalog.error {
                 StatusBanner(.error, message: error)
             }
         }
@@ -28,8 +28,8 @@ struct OptionsStepView: View {
     private func loadIfNeeded() {
         guard ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != "1" else { return }
         if model.platform == .macos {
-            if model.macInstallers.isEmpty { model.loadMacCatalog() }
-        } else if model.languages.isEmpty {
+            if model.catalog.macInstallers.isEmpty { model.loadMacCatalog() }
+        } else if model.catalog.languages.isEmpty {
             model.loadWindowsCatalog()
         }
     }
@@ -47,18 +47,18 @@ struct OptionsStepView: View {
                 .onChange(of: model.osChoice) { _ in model.loadWindowsCatalog() }
             }
 
-            if !model.editions.isEmpty {
+            if !model.catalog.editions.isEmpty {
                 LabeledContent("Edition") {
-                    picker("Edition", selection: $model.editionIndex, items: model.editions.map(\.name))
+                    picker("Edition", selection: $model.catalog.editionIndex, items: model.catalog.editions.map(\.name))
                 }
             }
-            if !model.languages.isEmpty {
+            if !model.catalog.languages.isEmpty {
                 LabeledContent("Language") {
-                    picker("Language", selection: $model.languageIndex, items: model.languages.map(\.name))
+                    picker("Language", selection: $model.catalog.languageIndex, items: model.catalog.languages.map(\.name))
                 }
             }
 
-            if !model.languages.isEmpty {
+            if !model.catalog.languages.isEmpty {
                 StatusBanner(.information, message: "Downloaded directly from Microsoft.")
             }
 
@@ -103,14 +103,14 @@ struct OptionsStepView: View {
 
     private var macOptions: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if !model.macInstallers.isEmpty {
+            if !model.catalog.macInstallers.isEmpty {
                 // A grid rather than a row: the list comes live from Apple, so the
                 // number of majors grows on its own and a fixed HStack would squash.
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 116), spacing: 10)], spacing: 10) {
-                    ForEach(model.macOSGroups) { group in groupTile(group) }
+                    ForEach(model.catalog.macOSGroups) { group in groupTile(group) }
                 }
 
-                if let installer = model.selectedMacInstaller, let group = model.selectedMacGroup {
+                if let installer = model.catalog.selectedMacInstaller, let group = model.catalog.selectedMacGroup {
                     selectedBuildPanel(installer: installer, group: group)
                     Text("The installer (\(installer.sizeText)) downloads to your Applications folder "
                        + "first, then is written to the USB.")
@@ -133,11 +133,11 @@ struct OptionsStepView: View {
                 if group.builds.count > 1 {
                     Button {
                         withAnimation(.easeInOut(duration: Theme.selectionDuration)) {
-                            model.showOlderMacBuilds.toggle()
+                            model.catalog.showOlderMacBuilds.toggle()
                         }
                     } label: {
                         Label("Older builds",
-                              systemImage: model.showOlderMacBuilds ? "chevron.up" : "chevron.down")
+                              systemImage: model.catalog.showOlderMacBuilds ? "chevron.up" : "chevron.down")
                             .font(.footnote)
                     }
                     .buttonStyle(.plain).foregroundStyle(Theme.accent)
@@ -146,7 +146,7 @@ struct OptionsStepView: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 10)
 
-            if model.showOlderMacBuilds {
+            if model.catalog.showOlderMacBuilds {
                 Divider()
                 VStack(spacing: 0) {
                     ForEach(group.builds) { build in buildRow(build, latest: group.latest) }
@@ -161,11 +161,11 @@ struct OptionsStepView: View {
     }
 
     private func groupTile(_ group: MacOSGroup) -> some View {
-        let selected = model.selectedMacGroupTitle == group.id
+        let selected = model.catalog.selectedMacGroupTitle == group.id
         return Button {
-            model.selectedMacGroupTitle = group.id
-            model.selectedMacBuild = group.latest.build
-            model.showOlderMacBuilds = false
+            model.catalog.selectedMacGroupTitle = group.id
+            model.catalog.selectedMacBuild = group.latest.build
+            model.catalog.showOlderMacBuilds = false
         } label: {
             VStack(spacing: 9) {
                 RoundedRectangle(cornerRadius: 13, style: .continuous)
@@ -197,8 +197,8 @@ struct OptionsStepView: View {
     }
 
     private func buildRow(_ build: MacOSInstaller, latest: MacOSInstaller) -> some View {
-        let selected = model.selectedMacBuild == build.build
-        return Button { model.selectedMacBuild = build.build } label: {
+        let selected = model.catalog.selectedMacBuild == build.build
+        return Button { model.catalog.selectedMacBuild = build.build } label: {
             HStack(spacing: 8) {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(selected ? Theme.accent : Color.secondary.opacity(0.4))

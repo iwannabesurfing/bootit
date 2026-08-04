@@ -139,7 +139,7 @@ struct RootView: View {
             .accessibilityIdentifier(model.driveEjected ? "done-button" : "eject-primary-button")
         default:
             Button { model.primaryAction() } label: {
-                if model.step == .options, model.loadingCatalog {
+                if model.step == .options, model.catalog.isLoading {
                     HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Loading…") }
                 } else {
                     Text(model.primaryActionTitle)

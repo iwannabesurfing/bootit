@@ -104,7 +104,7 @@ final class FlowTests: XCTestCase {
         let model = model { $0.step = .options; $0.platform = .windows }
         XCTAssertFalse(model.isPrimaryActionEnabled, "no languages loaded yet")
 
-        model.languages = [CatalogItem(id: "1", name: "English (United States)")]
+        model.catalog.languages = [CatalogItem(id: "1", name: "English (United States)")]
         XCTAssertTrue(model.isPrimaryActionEnabled)
         XCTAssertEqual(model.flowDecision(fileExists: filePresent),
                        .advance(to: .usb, refreshingDisks: true))
@@ -113,8 +113,8 @@ final class FlowTests: XCTestCase {
     func testOptionsStepStaysDisabledWhileLoading() {
         let model = model {
             $0.step = .options; $0.platform = .windows
-            $0.languages = [CatalogItem(id: "1", name: "English (United States)")]
-            $0.loadingCatalog = true
+            $0.catalog.languages = [CatalogItem(id: "1", name: "English (United States)")]
+            $0.catalog.isLoading = true
         }
         XCTAssertFalse(model.isPrimaryActionEnabled)
     }
@@ -179,10 +179,10 @@ final class FlowTests: XCTestCase {
     }
 
     func testGoBackClearsAStaleErrorMessage() {
-        let model = model { $0.step = .options; $0.catalogError = "Couldn't reach Microsoft." }
+        let model = model { $0.step = .options; $0.catalog.error = "Couldn't reach Microsoft." }
         model.goBack()
         XCTAssertEqual(model.step, .source)
-        XCTAssertNil(model.catalogError)
+        XCTAssertNil(model.catalog.error)
     }
 
     func testGoBackIsInertWhereThereIsNoBack() {

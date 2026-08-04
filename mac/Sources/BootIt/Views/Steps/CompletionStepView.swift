@@ -79,11 +79,11 @@ struct CompletionStepView: View {
     private var summary: String {
         var parts: [String] = []
         if isMac {
-            if let installer = model.selectedMacInstaller { parts.append(installer.displayName) }
+            if let installer = model.catalog.selectedMacInstaller { parts.append(installer.displayName) }
         } else {
             parts.append(model.osChoice.title)
-            if model.editionIndex < model.editions.count {
-                parts.append(model.editions[model.editionIndex].name)
+            if model.catalog.editionIndex < model.catalog.editions.count {
+                parts.append(model.catalog.editions[model.catalog.editionIndex].name)
             }
         }
         if let drive = model.selectedDrive { parts.append(drive.sizeText) }

@@ -56,7 +56,7 @@ struct SourceStepView: View {
                              : "Downloaded directly from Microsoft, not repackaged.")
             }
 
-            if let error = model.catalogError {
+            if let error = model.catalog.error {
                 StatusBanner(.error, message: error)
             }
         }
@@ -94,17 +94,17 @@ struct SourceStepView: View {
     }
 
     @ViewBuilder private var macInstallerPicker: some View {
-        if model.macInstalledApps.isEmpty {
+        if model.catalog.macInstalledApps.isEmpty {
             StatusBanner(.warning,
                          message: "No “Install macOS …” app found in /Applications. "
                                 + "Download one above, get it from the App Store, or browse to it.")
             HStack { Spacer(); Button("Browse…", action: browseMacApp).accessibilityIdentifier("browse-button") }
         } else {
             VStack(spacing: 8) {
-                ForEach(model.macInstalledApps, id: \.path) { url in
+                ForEach(model.catalog.macInstalledApps, id: \.path) { url in
                     let name = url.deletingPathExtension().lastPathComponent
-                    ChoiceCard(selected: model.macAppPath == url.path, symbol: "app.badge") {
-                        model.macAppPath = url.path
+                    ChoiceCard(selected: model.catalog.macAppPath == url.path, symbol: "app.badge") {
+                        model.catalog.macAppPath = url.path
                     } content: {
                         Text(name).font(.callout.weight(.medium))
                     }
@@ -122,7 +122,7 @@ struct SourceStepView: View {
         panel.allowsOtherFileTypes = true
         panel.directoryURL = downloads
         if panel.runModal() == .OK, let url = panel.url {
-            model.localISOPath = url.path; model.catalogError = nil
+            model.localISOPath = url.path; model.catalog.error = nil
         }
     }
 
@@ -132,7 +132,7 @@ struct SourceStepView: View {
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
         panel.canChooseDirectories = false
         if panel.runModal() == .OK, let url = panel.url {
-            model.macAppPath = url.path; model.catalogError = nil
+            model.catalog.macAppPath = url.path; model.catalog.error = nil
         }
     }
 

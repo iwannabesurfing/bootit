@@ -40,26 +40,10 @@ final class AppModel: ObservableObject {
     @Published var osChoice: OSChoice = .windows11
     @Published var bypassWin11 = false   // write autounattend.xml (TPM/SB/RAM + BypassNRO)
     @Published var localISOPath = ""
-    @Published var editions: [CatalogItem] = []
-    @Published var languages: [CatalogItem] = []
-    @Published var editionIndex = 0
-    @Published var languageIndex = 0
 
-    // macOS
-    @Published var macInstallers: [MacOSInstaller] = []
-    @Published var selectedMacGroupTitle = ""     // e.g. "macOS Tahoe"
-    @Published var selectedMacBuild = ""          // MacOSInstaller.build
-    @Published var showOlderMacBuilds = false
-    @Published var macInstalledApps: [URL] = []
-    @Published var macAppPath = ""        // chosen existing "Install macOS *.app"
-
-    var macOSGroups: [MacOSGroup] { MacOSGroup.group(macInstallers) }
-    var selectedMacGroup: MacOSGroup? { MacOSGroup.selected(macOSGroups, titled: selectedMacGroupTitle) }
-    var selectedMacInstaller: MacOSInstaller? { MacOSGroup.selected(selectedMacGroup, build: selectedMacBuild) }
-
-    // Catalogue loading (shared)
-    @Published var loadingCatalog = false
-    @Published var catalogError: String?
+    /// What can be installed, and what the user has picked from it. A value
+    /// type, so mutating it republishes without a nested-observable subscription.
+    @Published var catalog = CatalogModel()
 
     // USB
     @Published var disks: [USBDisk] = []
@@ -118,11 +102,6 @@ final class AppModel: ObservableObject {
 
     private let cancelFlag = CancelFlag()
 
-    /// Bumped on every catalogue load; a completion whose id no longer matches
-    /// has been superseded (e.g. the user switched Windows version mid-fetch)
-    /// and must not write its stale results.
-    private var catalogLoadID = 0
-
     init(privilegedCancel: @escaping () -> Void = { PrivilegedHelper.shared.cancel() },
          preflight: InstallPreflight = InstallPreflight()) {
         self.privilegedCancel = privilegedCancel
@@ -137,10 +116,7 @@ final class AppModel: ObservableObject {
     var canStart: Bool { selectedDrive != nil && hasAcknowledgedErase && !preflight.appWasReplaced }
 
     /// Whether the options step has enough loaded to continue.
-    var optionsReady: Bool {
-        guard !loadingCatalog else { return false }
-        return platform == .macos ? !macInstallers.isEmpty : !languages.isEmpty
-    }
+    var optionsReady: Bool { catalog.isReady(for: platform) }
 
     // MARK: - Was this app replaced while it was open?
 
@@ -305,14 +281,7 @@ final class AppModel: ObservableObject {
     // MARK: - Catalogue loaders (called when the options/source step appears)
 
     func loadWindowsCatalog() {
-        loadingCatalog = true
-        catalogError = nil
-        // Clear stale results immediately so the previous version's edition/
-        // language don't linger on screen while the new ones fetch.
-        editions = []
-        languages = []
-        catalogLoadID += 1
-        let loadID = catalogLoadID
+        let loadID = catalog.beginLoad(clearingWindowsResults: true)
         let key = osKey
         worker.async { [weak self] in
             guard let self else { return }
@@ -321,50 +290,25 @@ final class AppModel: ObservableObject {
                 cat.register(osKey: key)
                 let eds = cat.editions(osKey: key)
                 let langs = try cat.languages(editionID: eds.first?.id ?? "", osKey: key)
-                self.onMain {
-                    guard self.catalogLoadID == loadID else { return }
-                    self.editions = eds
-                    self.languages = langs
-                    self.editionIndex = 0
-                    self.languageIndex = langs.firstIndex { $0.name.lowercased().hasPrefix("english") } ?? 0
-                    self.loadingCatalog = false
-                }
+                self.onMain { self.catalog.acceptWindows(editions: eds, languages: langs, id: loadID) }
             } catch {
-                self.onMain {
-                    guard self.catalogLoadID == loadID else { return }
-                    self.loadingCatalog = false
-                    self.catalogError = self.message(error)
-                }
+                let described = self.message(error)
+                self.onMain { self.catalog.fail(described, id: loadID) }
             }
         }
     }
 
     func loadMacCatalog() {
-        loadingCatalog = true
-        catalogError = nil
-        catalogLoadID += 1
-        let loadID = catalogLoadID
+        let loadID = catalog.beginLoad()
         worker.async { [weak self] in
             guard let self else { return }
             let list = MacInstaller.listAvailable()
-            self.onMain {
-                guard self.catalogLoadID == loadID else { return }
-                self.macInstallers = list
-                self.selectedMacGroupTitle = list.first?.title ?? ""
-                self.selectedMacBuild = list.first?.build ?? ""
-                self.showOlderMacBuilds = false
-                self.loadingCatalog = false
-                if list.isEmpty {
-                    self.catalogError = "Couldn't get the macOS installer list from Apple. Check your connection and try again."
-                }
-            }
+            self.onMain { self.catalog.acceptMac(list, id: loadID) }
         }
     }
 
     func loadInstalledMacApps() {
-        let apps = MacInstaller.installedApps()
-        macInstalledApps = apps
-        if macAppPath.isEmpty, let first = apps.first { macAppPath = first.path }
+        catalog.acceptInstalledApps(MacInstaller.installedApps())
     }
 
     // MARK: - Disks
@@ -440,11 +384,12 @@ final class AppModel: ObservableObject {
             source: source,
             disk: drive.id,
             osKey: osKey,
-            skuID: (languageIndex < languages.count) ? languages[languageIndex].id : nil,
+            skuID: (catalog.languageIndex < catalog.languages.count)
+                ? catalog.languages[catalog.languageIndex].id : nil,
             localISO: localISOPath,
             bypassWin11: bypassWin11,
-            macVersion: selectedMacInstaller?.version,
-            macApp: macAppPath)
+            macVersion: catalog.selectedMacInstaller?.version,
+            macApp: catalog.macAppPath)
 
         worker.async { [weak self] in self?.runPipeline(request) }
     }
@@ -472,10 +417,8 @@ final class AppModel: ObservableObject {
         progress = 0; logText = ""; runError = nil; wasCancelled = false
         running = false; statusText = "Starting…"; copyState = nil
         currentPhase = nil; showsLogDetails = false; showsAdvancedWindowsOptions = false
-        editions = []; languages = []; macInstallers = []
-        selectedMacGroupTitle = ""; selectedMacBuild = ""; showOlderMacBuilds = false
-        localISOPath = ""; macAppPath = ""; bypassWin11 = false
-        catalogError = nil
+        catalog.reset()
+        localISOPath = ""; bypassWin11 = false
         // Only the findings that belong to a drive. `appWasReplaced` survives a
         // reset by design — starting over does not un-replace the bundle.
         preflight.forgetDrive()
