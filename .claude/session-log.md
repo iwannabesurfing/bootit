@@ -1,5 +1,131 @@
 # BootIt — session log
 
+## 2026-08-04 (session 3) — the carried item, and the queue that could never have drained
+
+**CI:** _(pending — filled in after the push)_
+**Local:** receipt `.claude/receipts/bootit-green.build-test-lint.receipt.txt` — **233 tests, 0
+failures** (221 at session start), 0 SwiftLint violations across 46 files, **0 compiler warnings**,
+full suite ThreadSanitizer-clean, design-index lint green. From `swift package clean`, and now with
+`-Xswiftc -warnings-as-errors`, so the warning count is enforced rather than read.
+
+### The headline
+
+The previous session left exactly one carried code item and said "nothing else is outstanding".
+That was true of the code and **false of the repo**. `leme-promotion-digest --validate` was
+reporting **22 errors, every one of them BootIt's**, and every one the same: `missing gate:`.
+
+That is handshake step 1 — the origin repo's own duty, and `_leme` cannot land a candidate that
+fails validation. So the twenty-two lessons this project has been capturing since 31 July could
+**never have drained**, and no session-start message said so; the digest reported them as pending,
+which reads as waiting rather than as blocked. Four sessions of capture, none of it landable.
+
+Fixed: all 22 carry a concrete `gate:` now, and BootIt validates clean. Federation errors 162 → 140.
+
+### The carried item was a structural hazard, not a slow function
+
+`checkWhetherAppWasReplaced()` ran a synchronous `stat` on the main thread on every
+`didBecomeActive`. The item was queued as "never profiled with a slow network volume as the
+bundle's parent" — but there is no measurement that makes a blocking main-thread filesystem call
+against a remote volume safe. Run from an SMB share whose server has gone away, that `stat` blocks
+for the mount's timeout, tens of seconds, every time the app comes to the front.
+
+So it was not profiled; it was moved. The reading now runs on a private serial queue — private
+rather than global so one hung mount blocks one thread nothing else waits on — and two guards keep
+it from piling up: the flag is latched, so once set there is nothing left to learn, and at most one
+reading is ever outstanding.
+
+Three tests assert the property that makes the speed irrelevant, driven by a fixture whose readings
+stall for 600 ms. **All three were mutation-checked, each on a tree proven to compile first:**
+restoring the synchronous read fails two of them, dropping the in-flight guard fails one, dropping
+the latch fails one.
+
+### The AppModel second pass, answered rather than performed
+
+Queued as "consider whether `AppModel` needs a second pass" on the basis that it still owns
+navigation, disks, the pipeline and progress. **The line-count case has gone** — it sits well inside
+its budget, and the previous pass already admitted its last extraction was shaving to hit a number.
+
+The case that would have justified it anyway was coverage: extracting `CatalogModel` is what made
+the supersede logic reachable, and two mutations then survived the whole suite. **That argument does
+not transfer.** `runPipeline` / `runWindows` / `runMac` are almost entirely sequencing of five
+concrete collaborators, each already tested; making the sequencing testable means injecting all five
+into the one code path that erases a drive, and the entire yield would be asserting that mocks are
+called in order.
+
+What *was* untested in there was not the sequencing — it was two value-returning decisions, and
+neither needed the pipeline moved:
+
+- **The progress-ring arithmetic.** Where the write lands on the ring, including the case where the
+  installer was already in `/Applications` so the download owns none of it. Zero tests, on a bar
+  that has shipped three wrong answers.
+- **Cancelled versus failed.** Built from three separate ternaries on one flag — three chances for
+  one to be edited alone — inside a `catch` reachable only by cancelling a real forty-minute write.
+
+Both now live in `RunPlan` as pure functions with 9 tests. **Five mutations, five bites**, each
+build-verified: charging the ring for a reused installer, charging a local source as a download,
+swapping the two platform weights, reporting our own SIGTERM as the failure, and opening the log on
+a cancellation.
+
+### Two gates added, each proven to fail before being trusted
+
+- **`-Xswiftc -warnings-as-errors`** in CI, on build and test. "0 compiler warnings" has been an
+  unbacked claim in this repo twice, once asserted in the log while the cited receipt contained one.
+  Falsified both ways: an `let unused = 1` planted in `RunPlan.swift` makes it exit 1 naming the
+  line, while a plain `swift build` on the identical tree prints **ten** warnings and still reports
+  "Build complete" with exit 0.
+- **`bin/design-index-check.sh`** + `docs/DESIGN-INDEX.md` (B-DESIGNCTX, owed since adoption). In
+  its own ubuntu workflow, not in `ci.yml` — partly cost, mostly because `ci.yml` carries
+  `paths-ignore: '**/*.md'`, so the commit that lands a new synthesis with no index row would be the
+  one commit that never ran the check. Falsified both ways: a planted synthesis exits 1 naming it, a
+  missing index exits 1.
+
+### Decisions
+
+- **Nine of the twenty-two candidates moved off L2/L3 down to L4 + `fdd-field`.** L2 means "a
+  mechanical gate carries this"; if none exists, L2 is the over-claim the schema exists to prevent.
+  Four moved *up* to a real `test:` path that already pins them, and one — `try` on a non-throwing
+  ObjC method — moved to `build-setting:-warnings-as-errors`, which is why that gate got built this
+  session rather than cited as an intention.
+- **Nothing cites a gate that cannot be run.** A `test:` path or a build flag that does not exist is
+  the same unbacked claim these lessons are about.
+- **The design index records four subsystems with no design document at all**, rather than omitting
+  the rows. That is the true state of a v3.3.0 app with one gated decision.
+
+### Issues discovered
+
+- **The queue's own reporting hid the blockage.** Session-start prints pending counts and a drain
+  budget; it does not print `--validate`. Twenty-two unlandable candidates and four sessions of
+  capture presented identically to twenty-two landable ones.
+- **`_leme` still owes 1 reconcile-close elsewhere**, and the +43 drain overage is federation-wide.
+  BootIt cannot clear either from here — it can only stop being the reason its own share is stuck,
+  which is what this session did.
+
+### Test results
+
+233 tests, 0 failures (221 at session start). SwiftLint strict: 0 violations, 46 files. 0 compiler
+warnings from a fully cleaned tree, now enforced. Full suite TSAN-clean.
+
+**Eight mutation checks, every one build-verified before its result was believed** — the harness
+asserts the mutated tree compiles, because a patch that silently fails to apply reports SURVIVES and
+reads as "this test does not bite". All eight bit; none survived.
+
+Not covered by tests, and said so rather than faked: whether a real stalled SMB mount behaves like
+the 600 ms fixture. The fixture proves the main thread is not blocked *by this code*; it cannot
+prove what a particular network filesystem does under failure.
+
+### Next session should start with
+
+1. **Nothing is carried.** The one carried code item is closed, both flagged federation items in
+   BootIt's boundary are closed, and the queue validates clean. The next real work is new work.
+2. **The mutation harness is written from scratch every session.** Three sessions, ~27 mutation
+   checks, and each one has hand-rolled the same script with the same gotcha (build-verify before
+   believing SURVIVES) — which is itself one of the queued lessons. It wants to be a committed
+   `bin/mutation-check.sh`, which would also turn that candidate's `fdd-field` into a real `test:`
+   gate. Flagged, not built — the call is the user's.
+3. **`AppModel`'s pipeline is still untested as sequencing.** Recorded above as a deliberate skip
+   with its reasoning, not an oversight. If it is ever revisited, the trigger should be a bug in the
+   sequencing itself, not the line count.
+
 ## 2026-08-04 (session 2) — the drive ran, the measurement overruled the model, and v3.3.0 shipped
 
 **Commits:** `1525e6e` → `9ea5b08` (6 this session), all pushed.
