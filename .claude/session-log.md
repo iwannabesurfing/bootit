@@ -111,22 +111,67 @@ warnings from a fully cleaned tree, now enforced. Full suite TSAN-clean.
 
 **Eight mutation checks, every one build-verified before its result was believed** — the harness
 asserts the mutated tree compiles, because a patch that silently fails to apply reports SURVIVES and
-reads as "this test does not bite". All eight bit; none survived.
+reads as "this test does not bite". All eight bit; none survived. They are committed as a corpus and
+reproduce identically through `bin/mutation-check.py`, which is what makes that claim re-checkable
+rather than a number in a log.
 
 Not covered by tests, and said so rather than faked: whether a real stalled SMB mount behaves like
 the 600 ms fixture. The fixture proves the main thread is not blocked *by this code*; it cannot
 prove what a particular network filesystem does under failure.
 
+### Two questions had been dropped, not answered
+
+Asked "what is left", and the honest answer was not the one this log had been giving. Each session's
+"next session" list has only ever carried forward from the session immediately before it, so an item
+that was not picked up in the very next session **left the record silently**. Two did:
+
+- **Is `SMAppService` registration admin-gated?** Raised 2026-08-03, never tested, never mentioned
+  again. It decides whether a *standard* (non-admin) macOS account can approve a system-wide root
+  daemon — that is, whether BootIt works at all for a non-admin user. ~5 minutes on a test account.
+  The only open question with a user-facing consequence.
+- **Does Xcode render `#Preview` for a SwiftPM *executable* target?** Raised 2026-08-01, unresolved.
+  29 preview fixtures sit behind `#if DEBUG` on the assumption that it does. If it does not, they
+  are dead weight and the fix is a library target plus a thin executable — a `Package.swift` change.
+
+Neither was closed and neither was decided against; they were simply not repeated. This section
+exists so they stop falling off. **Both are human-gated** — one needs a second account, the other
+needs Xcode open — which is exactly why they kept slipping past sessions that were writing code.
+
+### The mutation harness became a committed tool
+
+Flagged as an automation shape and then built in the same session, because the flag was accepted.
+Three sessions and ~27 mutation checks had each hand-rolled the same throwaway script with the same
+gotcha — build-verify before believing SURVIVES — which is itself one of the queued lessons.
+
+`bin/mutation-check.py` reports **four verdicts, not a boolean**: `BITES`, `SURVIVES`,
+`NOT-APPLIED` and `NOT-COMPILED`. The last two exit non-zero exactly like `SURVIVES`, because a
+verdict you cannot believe must never be quieter than one you can. The eight mutations from this
+session are committed as a corpus in `mac/mutations/`, so re-running them after a refactor that
+moves their anchors is one command rather than a re-derivation — which this repo has already needed
+once.
+
+`--self-test` runs in CI and checks **both** directions, because both failures are silent:
+
+- Four refusals — missing anchor, ambiguous anchor, a filter matching no tests, a missing file.
+- A tree that does not compile → `NOT-COMPILED`, the lesson the harness exists to carry.
+- And the more dangerous one: **real code, really mutated and compiled, under a filter that does not
+  cover it, must report `SURVIVES`.** A harness that can only ever say `BITES` is not conservative —
+  it certifies every behaviour as tested, including the ones that are not, with no symptom at all.
+
+That turns `a-mutation-check-must-verify-its-own-build` from `L4 + fdd-field` into
+`L2 + test:bin/mutation-check.py --self-test` — a real gate rather than an intention. Only the
+self-test runs in CI; the corpus is eight builds plus eight filtered runs on a 10x runner, and it is
+the thing you run deliberately when tests change.
+
 ### Next session should start with
 
-1. **Nothing is carried.** The one carried code item is closed, both flagged federation items in
-   BootIt's boundary are closed, and the queue validates clean. The next real work is new work.
-2. **The mutation harness is written from scratch every session.** Three sessions, ~27 mutation
-   checks, and each one has hand-rolled the same script with the same gotcha (build-verify before
-   believing SURVIVES) — which is itself one of the queued lessons. It wants to be a committed
-   `bin/mutation-check.sh`, which would also turn that candidate's `fdd-field` into a real `test:`
-   gate. Flagged, not built — the call is the user's.
-3. **`AppModel`'s pipeline is still untested as sequencing.** Recorded above as a deliberate skip
+1. **`SMAppService` admin-gating** (above). Small, human-gated, and the only open item that can
+   change whether the app works for a class of users.
+2. **The Xcode preview question** (above). Small, human-gated, decides whether 29 fixtures earn
+   their place.
+3. **Everything else is closed.** No code is carried, both flagged federation items inside BootIt's
+   boundary are closed, and the queue validates clean.
+4. **`AppModel`'s pipeline is still untested as sequencing.** Recorded above as a deliberate skip
    with its reasoning, not an oversight. If it is ever revisited, the trigger should be a bug in the
    sequencing itself, not the line count.
 
