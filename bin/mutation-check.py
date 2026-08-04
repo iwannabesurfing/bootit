@@ -158,7 +158,29 @@ def self_test():
     print("MUTATION-HARNESS SELF-TEST")
     failures = 0
 
-    target = "Sources/BootIt/RunPlan.swift"
+    target = "Sources/BootItKit/RunPlan.swift"
+
+    # Checked first, and loudly, because its absence does not fail the cases
+    # below — it makes three of them pass for the wrong reason. "Missing
+    # anchor", "ambiguous anchor" and "filter matches no tests" all expect
+    # NOT-APPLIED, and a file that is not there returns NOT-APPLIED too. So a
+    # refactor that moves this file turns three assertions into one, silently,
+    # and the self-test still prints PASS beside each of them.
+    #
+    # That happened: 2026-08-05 moved Sources/BootIt into Sources/BootItKit and
+    # CI reported two failures where there were five degraded checks. The two
+    # that failed were the two expecting something *other* than NOT-APPLIED —
+    # which is to say the harness was caught by the only cases whose expected
+    # verdict differed from the failure mode.
+    if not (PACKAGE / target).exists():
+        print(f"  FAIL  the self-test's own fixture is missing: {target}")
+        print("        Three cases below expect NOT-APPLIED and a missing file returns")
+        print("        NOT-APPLIED, so they would pass without testing anything. Point")
+        print("        `target` at a real source file before believing any result here.")
+        print()
+        print("SELF-TEST FAIL — the harness cannot check itself, so it cannot be trusted.")
+        return 1
+
     cases = [
         ("a missing anchor is refused, not reported as SURVIVES", NOT_APPLIED,
          {"file": target, "filter": "RunOutcome",
@@ -170,7 +192,7 @@ def self_test():
          {"file": target, "filter": "NoSuchTestClassExistsHere",
           "old": "enum RunPlan {", "new": "enum RunPlan {"}),
         ("a file that is not there is refused", NOT_APPLIED,
-         {"file": "Sources/BootIt/NoSuchFile.swift", "filter": "RunOutcome",
+         {"file": "Sources/BootItKit/NoSuchFile.swift", "filter": "RunOutcome",
           "old": "a", "new": "b"}),
         # The one that costs a build, and the whole point of the lesson: a
         # mutation that cannot compile must never be reported as a result.

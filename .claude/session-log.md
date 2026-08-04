@@ -93,6 +93,35 @@ down as the answer.
   updated to distinguish them: both were measured or quoted from a primary source before being acted
   on, and the evidence sits at the call site. Not a design document, but falsifiable.
 
+### The self-test had five degraded checks, and CI could only see two
+
+The first push went red. Build, test and TSAN passed; **the mutation harness self-test
+failed**. Its fixture was `Sources/BootIt/RunPlan.swift` — moved by this session's refactor.
+The corpus specs had been repointed; the harness's own were not.
+
+The path was the trivial half. The real finding is what the self-test printed:
+
+```
+PASS  a missing anchor is refused …        — Sources/BootIt/RunPlan.swift does not exist
+PASS  an ambiguous anchor is refused        — Sources/BootIt/RunPlan.swift does not exist
+PASS  a filter matching no tests is refused — Sources/BootIt/RunPlan.swift does not exist
+```
+
+Three checks **passed for the wrong reason**. Each expects `NOT-APPLIED`, and a file that
+is not there returns `NOT-APPLIED`. So they were no longer testing missing anchors,
+ambiguous anchors or empty filters — they were all testing the same thing, and saying PASS
+while doing it. Only the two cases expecting something *other* than `NOT-APPLIED`
+(`NOT-COMPILED`, `SURVIVES`) could fail, which is the only reason CI caught anything at all.
+
+That is precisely the failure the harness exists to prevent, one level up: a check that
+certifies a property it is no longer exercising, with no symptom.
+
+Fixed by asserting the fixture exists **before** the cases run, and refusing outright if it
+does not — with a message naming the three cases that would otherwise pass hollow. Falsified
+both ways: pointing `target` at a moved path exits 1 without running the cases, restoring it
+exits 0. The seven checks now report seven distinct reasons rather than three copies of one.
+`--self-test` was added to the local receipt too, so this cannot next be caught only by CI.
+
 ### Issues discovered
 
 - **A queued lesson was partly wrong and is now corrected in place.**
@@ -147,6 +176,8 @@ administrator question a test cannot reach.
 [promote-spine: when a warning depends on reading the environment, return nil for "could not establish" and never false — a failed reading rendered as a finding tells administrators to go and find an administrator, and the wrong direction to fail is the confident one]
 
 [promote-spine: verify a build artefact against its own timestamp before believing what you read out of it — a relative path to `dist/` answers just as confidently from a stale bundle as from the one just built]
+
+[promote-spine: when several test cases assert the SAME expected value they can collapse into one silently — BootIt's self-test had three cases for "missing anchor", "ambiguous anchor" and "empty filter", all expecting NOT-APPLIED, and a moved fixture satisfied all three for a fourth reason while printing PASS; assert the fixture exists before the cases, and treat identical detail strings across passing cases as the smell]
 
 ## 2026-08-04 (session 3) — the carried item, and the queue that could never have drained
 
