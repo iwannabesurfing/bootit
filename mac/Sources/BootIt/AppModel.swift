@@ -120,10 +120,10 @@ final class AppModel: ObservableObject {
 
     // MARK: - Was this app replaced while it was open?
 
-    /// Cheap enough to run every time the app comes to the front, which is the
-    /// moment it matters: the user has just been in Finder dragging the new
-    /// version over the old one, and is coming back to a window whose code is
-    /// no longer the code in the bundle beneath it.
+    /// Run every time the app comes to the front, which is the moment it
+    /// matters: the user has just been in Finder dragging the new version over
+    /// the old one, and is coming back to a window whose code is no longer the
+    /// code in the bundle beneath it.
     ///
     /// Deliberately does not care whether a write is running. Setting the flag
     /// interrupts nothing — it gates the *next* Start and shows a banner on the
@@ -131,15 +131,45 @@ final class AppModel: ObservableObject {
     /// way holds a live connection to the daemon it started with and is safer
     /// finished than abandoned.
     ///
-    /// The reading is taken wherever this is called; the decision it feeds is
-    /// made on the main queue. That is the discipline the whole subsystem now
-    /// uses after a reducer mutated from two threads shipped, and
-    /// `swift test --sanitize=thread` is a CI gate specifically so the next
-    /// version of that mistake fails a build rather than a drive.
+    /// **The reading never happens on the main thread.** It is one `stat`, and
+    /// on a local disk it is measured in microseconds — but nothing constrains
+    /// an `.app` to a local disk. Run from a mounted SMB or NFS share whose
+    /// server has since gone away, that `stat` blocks for the mount's timeout,
+    /// which is tens of seconds, on every single activation. There is no
+    /// measurement that makes a synchronous main-thread filesystem call against
+    /// a remote volume safe, so this does not try to be fast — it declines to
+    /// be on the main thread at all. The decision it feeds is still made there,
+    /// which is the single-writer discipline the rest of this subsystem uses.
+    ///
+    /// Two guards, both for the same hung-volume case. The flag is latched, so
+    /// once it is set no further reading can change anything and asking again
+    /// is pure cost. And at most one reading is ever outstanding: activations
+    /// arrive far faster than a stalled mount answers, and a queue of blocked
+    /// `stat`s is how one slow volume becomes an exhausted thread pool.
     func checkWhetherAppWasReplaced() {
-        let current = preflight.bundleIdentity()
-        onMain { self.preflight.noteBundleReading(current) }
+        onMain {
+            guard !self.preflight.appWasReplaced, !self.bundleReadingInFlight else { return }
+            self.bundleReadingInFlight = true
+            let read = self.preflight.bundleIdentity
+            self.bundleReader.async { [weak self] in
+                let current = read()
+                self?.onMain {
+                    self?.bundleReadingInFlight = false
+                    self?.preflight.noteBundleReading(current)
+                }
+            }
+        }
     }
+
+    /// Where the reading above runs. Its own queue rather than a global one: a
+    /// `stat` against a dead network mount blocks its thread for the mount's
+    /// timeout, and a private queue confines that to one thread nothing else is
+    /// waiting on. Not `private` only so a test can drain it; nothing else
+    /// submits here.
+    let bundleReader = DispatchQueue(label: "bootit.bundle-reader", qos: .utility)
+
+    /// Touched on the main queue only, like everything else this model owns.
+    private var bundleReadingInFlight = false
 
     // MARK: - Can the helper actually write to a USB drive?
 
@@ -442,25 +472,18 @@ final class AppModel: ObservableObject {
                 self.step = .done
             }
         } catch {
-            // Stopping on request is not a fault. The tool's own message is
-            // discarded here on purpose: "createinstallmedia exited 15" is the
-            // SIGTERM *we* sent it, and reporting that as "Something went wrong"
-            // — with diagnostics to copy and a hint about what to try — blames
-            // the user for pressing the button we offered them.
-            let cancelled = cancelFlag.isCancelled
-            let msg = cancelled
-                ? "Stopped before the installer was finished, so the drive is not bootable. Start over to make one."
-                : message(error)
+            // How this is reported is decided in `RunPlan`, where it is a pure
+            // function of "did the user ask for this" and can be falsified
+            // without a drive. All that happens here is applying it.
+            let outcome = RunPlan.outcome(cancelled: cancelFlag.isCancelled,
+                                          describedError: message(error))
             onMain {
                 self.running = false
-                self.wasCancelled = cancelled
-                self.statusText = cancelled ? "Cancelled" : "Error"
-                self.runError = msg
-                // A failure is exactly when the technical detail stops being
-                // noise and starts being the thing you need. A cancellation is
-                // not that moment — nothing in the log needs reading.
-                self.showsLogDetails = !cancelled
-                self.log(cancelled ? "\nCancelled." : "\n❌  \(msg)")
+                self.wasCancelled = outcome.wasCancelled
+                self.statusText = outcome.statusText
+                self.runError = outcome.message
+                self.showsLogDetails = outcome.showsLogDetails
+                self.log(outcome.logLine)
             }
         }
     }
@@ -469,7 +492,12 @@ final class AppModel: ObservableObject {
 
     private func runWindows(_ request: BuildRequest) throws {
         let isoPath: String
-        let writeBase: Double
+        // Windows never reuses an already-downloaded installer the way macOS
+        // does, so the base is a property of the source alone and is known
+        // before the download starts.
+        let writeBase = RunPlan.writeBase(platform: .windows,
+                                          source: request.source,
+                                          installerWasReused: false)
         if request.source == .download {
             setPhase(.downloading)
             log("Resolving download from Microsoft…")
@@ -483,15 +511,16 @@ final class AppModel: ObservableObject {
                 url: url, dest: dest,
                 isCancelled: { self.cancelFlag.isCancelled },
                 onProgress: { frac, speed, eta in
-                    self.setProgress(frac * 0.55, "Downloading…  \(Int(frac * 100))%  \(speed)  ETA \(eta)")
+                    // The download owns exactly the stretch the write is scaled
+                    // out of, so both come from the one number.
+                    self.setProgress(frac * writeBase,
+                                     "Downloading…  \(Int(frac * 100))%  \(speed)  ETA \(eta)")
                 },
                 onLog: { self.log($0) }).download()
             isoPath = dest.path
-            writeBase = 0.55
         } else {
             isoPath = request.localISO
             log("Using local ISO:\n\(request.localISO)")
-            writeBase = 0.0
         }
         try check()
         log("\nWriting USB drive…")
@@ -511,9 +540,16 @@ final class AppModel: ObservableObject {
         if request.source == .download {
             setPhase(.downloading)
             guard let version = request.macVersion else { throw MacInstallerError.noInstallersListed }
+            // Whether the installer was already on disk is only known once the
+            // call returns, so the download's own share is the one a download
+            // that genuinely runs owns. If it turns out to have been reused,
+            // nothing was fetched and no progress was reported through here.
+            let downloadShare = RunPlan.writeBase(platform: .macos,
+                                                  source: .download,
+                                                  installerWasReused: false)
             let dl = MacInstaller(
                 cancel: cancelFlag,
-                onProgress: { frac, status in self.setProgress(frac * 0.5, status) },
+                onProgress: { frac, status in self.setProgress(frac * downloadShare, status) },
                 onLog: { self.log($0) })
             let source = try dl.download(version: version)
             installerApp = source.path
@@ -522,11 +558,15 @@ final class AppModel: ObservableObject {
             // rather than ticking green, so a bar at 2% is not contradicted by a
             // completed stage sitting above it.
             onMain { self.downloadSkipped = source.reused }
-            writeBase = source.reused ? 0.0 : 0.5
+            writeBase = RunPlan.writeBase(platform: .macos,
+                                          source: .download,
+                                          installerWasReused: source.reused)
         } else {
             installerApp = request.macApp
             log("Using installer:\n\(request.macApp)")
-            writeBase = 0.0
+            writeBase = RunPlan.writeBase(platform: .macos,
+                                          source: .local,
+                                          installerWasReused: false)
         }
         try check()
         let span = 1.0 - writeBase
