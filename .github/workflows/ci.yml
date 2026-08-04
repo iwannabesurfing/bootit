@@ -44,11 +44,26 @@ jobs:
       - name: Show Swift version
         run: swift --version
 
-      - name: Build (debug)
-        run: swift build
+      # `-warnings-as-errors` because "0 compiler warnings" has been an unbacked
+      # claim in this repo twice. Once the session log asserted it while citing a
+      # receipt that contained `result of 'try?' is unused` — present the whole
+      # time, in the file the same session was editing. A warning nobody is
+      # obliged to look at is a warning nobody looks at.
+      #
+      # Verified in both directions on 2026-08-04 before being trusted, the same
+      # way the sanitizer below was: an `let unused = 1` planted in RunPlan.swift
+      # makes this exit 1 naming the file and line, while a plain `swift build`
+      # on the identical tree prints ten warnings and still reports "Build
+      # complete" with exit 0 — which is the silent-success shape a release
+      # workflow in this repo has already shipped once.
+      - name: Build (debug, warnings are errors)
+        run: swift build -Xswiftc -warnings-as-errors
 
+      # The flag is repeated rather than set once: the test target compiles
+      # separately, and a warning in a test is how a racing or dead assertion
+      # gets written without anybody noticing.
       - name: Test
-        run: swift test
+        run: swift test -Xswiftc -warnings-as-errors
 
       # Three threading bugs have shipped in the copy-progress subsystem alone: a
       # cancel dispatched onto the queue it was meant to interrupt, a poller
