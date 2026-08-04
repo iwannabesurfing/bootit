@@ -20,7 +20,7 @@ The bar in §D1 requires slow flash, fast flash, external SSD and a hub. None of
 | 1 | Do device `Bytes (Write)` and process `ri_diskio_byteswritten` diverge as Gemini predicts? *(settles D2)* | **CLOSED — prediction falsified.** They tracked each other all run, ending 1.2% apart. See M4. |
 | 2 | Does the device counter over a full run land within a few percent of the payload? *(settles whether a denominator exists)* | **CLOSED** — 1.048 with a measured baseline. See M4; baseline in M3, earlier estimate in M1. |
 | 3 | Is the 33-minute tail transfer or flush? | **CLOSED — transfer.** 1.5 GB written at 9.2 MB/s *after* the tool printed 100%. See M4. |
-| 4 | Do the counters survive device re-enumeration and sleep mid-run? *(ChatGPT's catch)* | **OPEN** — handled defensively regardless, see M2. Not exercised by M4: no sleep, no re-enumeration. |
+| 4 | Do the counters survive device re-enumeration and sleep mid-run? *(ChatGPT's catch)* | **CLOSED — sleep yes, replug no.** They are different hazards; only one needs handling. See M5. |
 
 ---
 
@@ -177,6 +177,39 @@ measuring something that finishes long before the drive does.
 **The 20.8-minute silence** between 309 s and 1562 s — `createinstallmedia` emitting nothing at
 all — is the stretch the feature exists for. The device counter moved in 612 of 625 samples
 across it, so the liveness display had something true to say for essentially all of it.
+
+---
+
+## M5 — sleep and re-enumeration, the last open question
+
+**2026-08-04, session 2.** Same stick, measured directly rather than during a write — the hazard
+is a property of the counter, not of a copy in flight, so this needed five minutes rather than
+another forty-minute run.
+
+| Event | `Bytes (Write)` before | after | Verdict |
+|---|---|---|---|
+| Unplug, plug back in | 21,261,767,168 | **99,840** | **Resets** |
+| Sleep, wake, drive left attached | 99,840 | **247,808** | **Survives** |
+
+**They are not the same hazard, and only one needs handling.** The counter lives on the
+`IOBlockStorageDriver` instance. Sleeping does not destroy it, so the count continues
+monotonically across a wake — the only trace is ~148 KB of flush-and-remount bookkeeping, well
+under the 1 MB `movementFloor` from M2, so it cannot make an idle drive look busy. Unplugging
+destroys the instance, and the replacement starts from zero.
+
+**ChatGPT's leg raised this and the other two did not.** It was handled defensively with no
+evidence either hazard was real. One is, and the handling is right: on a backwards reading
+`CopyProgressModel` rebases, gives up the run total **permanently**, and keeps throughput — a rate
+needs two adjacent samples, a total needs an origin. Reporting 99,840 bytes written after 21 GB
+had already landed would be a bar running backwards. Now pinned by `CounterHazardTests` and a
+mutation check.
+
+### The baseline varies by an order of magnitude
+
+M3 measured 871,936 bytes / 59 operations on attach. This attach cost **99,840 bytes / 4
+operations** — the difference being that the drive was cleanly ejected first, so there was no
+journal to replay. M3's "LOW confidence for the specific figure" was right: the origin is not
+just non-zero, it depends on how the drive was last detached. Nothing may hard-code it.
 
 ---
 
