@@ -2,9 +2,13 @@
 
 ## 2026-08-05 — both stale questions closed, and the fix for one was wrong
 
-**Commits:** _(pending — see end of section)_
+**Commits:** `e4bddad` → `16af11c` (3 this session), all pushed.
 
-**CI:** _(pending)_
+**CI:** green, SHA-anchored to `16af11c` (`headSha` verified equal to `git rev-parse HEAD`). Both
+workflows green on the final tree: run `30957737266` (CI — all eight steps ran, **none skipped**,
+including the mutation-harness self-test that failed on the first push) and run `30957737118`
+(Design index). The first push, `0cec37c`, went **red** — see below; that is the honest anchor for
+what this session shipped before it was fixed.
 **Local:** receipt `.claude/receipts/bootit-green.build-test-lint.receipt.txt` — **241 tests, 0
 failures** (233 at session start), 0 SwiftLint violations across 48 files, **0 compiler warnings**,
 full suite ThreadSanitizer-clean, design-index lint green. From `swift package clean`, with
