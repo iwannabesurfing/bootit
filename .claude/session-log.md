@@ -4,9 +4,10 @@
 
 **Commits:** `9290bfe` → `49e0b37` (6 this session), all pushed.
 
-**CI:** green, SHA-anchored to `49e0b37` (`headSha` verified equal to `git rev-parse HEAD`). Both
-workflows: run `30901164869` (CI — all seven steps ran, **none skipped**, including the new
-warnings-as-errors build) and run `30901164705` (Design index — first real execution, green).
+**CI:** green, SHA-anchored to `4d718bf` (`headSha` verified equal to `git rev-parse HEAD`). Both
+workflows green on the final tree: run `30914852075` (CI — all eight steps ran, **none skipped**,
+including the new warnings-as-errors build and the mutation-harness self-test) and run
+`30914851812` (Design index). The earlier mid-session anchor was run `30901164869` at `49e0b37`.
 **Local:** receipt `.claude/receipts/bootit-green.build-test-lint.receipt.txt` — **233 tests, 0
 failures** (221 at session start), 0 SwiftLint violations across 46 files, **0 compiler warnings**,
 full suite ThreadSanitizer-clean, design-index lint green. From `swift package clean`, and now with
