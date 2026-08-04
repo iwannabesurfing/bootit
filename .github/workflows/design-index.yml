@@ -1,0 +1,44 @@
+name: Design index
+
+# DESIGN-INDEX-P1 — the feature→docs map must not rot.
+#
+# Deliberately its own workflow rather than a step in `ci.yml`, for two reasons.
+#
+# Cost: `ci.yml` runs on macos-15 at roughly 10x Linux, and it is gated with
+# `paths-ignore: '**/*.md'` precisely so a docs-only commit does not spin a full
+# Apple toolchain build. This check is a bash script with no toolchain at all, so
+# it belongs on ubuntu, where running it on every push is free in practice.
+#
+# Coverage: the thing it guards IS a markdown file. Folding it into `ci.yml`
+# would put the check behind `paths-ignore: '**/*.md'` — so the commit that lands
+# a new synthesis with no index row, the exact commit this exists to catch, would
+# be the one commit that never runs it. A gate that cannot fire on its own trigger
+# is the silent-success shape this repo has already shipped once, in a release
+# workflow whose signing steps skipped and reported green.
+#
+# No paths filter here for the same reason: every way this can go red — a new
+# synthesis, a new FDD, a deleted index — is a change somewhere the filter would
+# have to anticipate. Ten seconds of ubuntu is cheaper than being clever.
+#
+# Verified in both directions on 2026-08-04 before being trusted: a planted
+# `docs/research/planted-decision-synthesis.md` with no row exits 1 naming it, a
+# missing index exits 1, and the real tree exits 0.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  design-index:
+    name: Feature→docs map is complete
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: DESIGN-INDEX-P1 coverage lint
+        run: ./bin/design-index-check.sh
