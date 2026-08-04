@@ -392,12 +392,10 @@ final class AppModel: ObservableObject {
     func eject(_ drive: USBDisk) {
         ejectError = nil
         worker.async { [weak self] in
-            let result = Shell.run(DiskLister.diskutil, ["eject", drive.id])
+            let result = DriveEject.perform(drive)
             guard let self else { return }
             self.onMain {
-                self.ejectError = result.ok
-                    ? nil
-                    : "Couldn't eject \(drive.name) — a file on it may still be open."
+                self.ejectError = result.ok ? nil : DriveEject.failureMessage(drive, result)
                 self.driveEjected = result.ok
             }
         }

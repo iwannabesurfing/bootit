@@ -65,7 +65,12 @@ struct CompletionStepView: View {
                     .accessibilityIdentifier("ejected-confirmation")
             }
             if let ejectError = model.ejectError {
-                Text(ejectError).font(.footnote).foregroundStyle(.secondary)
+                // A banner, not a footnote. This is an action the user pressed
+                // and which did not happen; as grey secondary text under a green
+                // tick it read as a hint about the list above it, and the drive
+                // stayed mounted while the screen still said "ready".
+                StatusBanner(.warning, message: ejectError)
+                    .accessibilityIdentifier("eject-error")
             }
         }
         .frame(maxWidth: .infinity)
