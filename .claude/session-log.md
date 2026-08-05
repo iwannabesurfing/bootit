@@ -2,7 +2,12 @@
 
 ## 2026-08-05 (session 2, part 3) — cancel fired for the first time, and mostly passed
 
-**Tests:** 254 (248 at part 2). **17 mutations, all biting.** Version 3.4.1.
+**Commit:** `b127528`. **Tag:** `v3.4.1`, published and verified from `releases/latest`.
+
+**CI:** green, SHA-anchored to `b127528` (run `30979752062`, all eight steps, none skipped). **Release:**
+run `30979867390`, all twelve steps green.
+**Local:** receipt — **254 tests** (248 at part 2), 0 failures, 0 SwiftLint violations across 48 files,
+0 compiler warnings from a cleaned tree, TSAN-clean, design-index green, **17 mutations all biting**.
 
 ### Cancel works. It has never been run until today.
 
