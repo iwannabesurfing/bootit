@@ -75,3 +75,26 @@ Note this is the *same defect class* the same repo had already promoted one day 
 `report-what-you-were-told-not-what-you-inferred` — that one about an app reporting to a user, this
 one about an agent reporting to its own future self. Naming a pattern in a promotion file does not
 prevent committing it in the next artefact you write.
+
+## A third instance, and this one had the evidence committed beside it (2026-08-05)
+
+Sharper than the two above, because the refutation was not merely available — it was **in the
+repository, in a file added by the same session that wrote the claim**.
+
+`InstallMediaProgress.swift` asserted in a doc comment, twice, that macOS 26's
+`createinstallmedia` "emits exactly three lines, none carrying a number" during the copy. It emits
+`Copying to disk: 0%… 100%`, and that line is present in `copy-run-2026-08-04.jsonl` — the trace
+fixture committed the same day. `RecordedRunTests` even **quotes the line in a test docstring**
+while the source file denies it exists.
+
+Three artefacts, one repo, two of them agreeing and the third contradicting both, green the whole
+time. The claim was never checked against the trace because writing a trace *feels* like having
+checked it.
+
+**The added rule:** when you record evidence, grep the recorded evidence for the claim you are
+about to write next to it. A fixture is not a check. It is only a check once something reads it —
+and a docstring is not something that reads it.
+
+The cost here was two shipped defects (a ring frozen at 95% for 85% of a 30-minute run, and a
+status line naming the wrong stage for the same stretch), found by a human watching the screen
+rather than by 241 green tests. See [[deleting-the-mechanism-leaves-the-belief]].

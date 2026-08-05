@@ -1,5 +1,127 @@
 # BootIt — session log
 
+## 2026-08-05 (session 2, part 2) — the hardware run, and the question that found the bug
+
+**Commits:** `a5bd14a`. **Tests:** 248 (241 at part 1), **14 mutations, all biting** (11 + 3 new).
+
+### The headline
+
+v3.4.0 was verified end to end on hardware — a full 30-minute macOS write, notarised build from
+`/Applications`, helper approved and running as root. **The release works.**
+
+It also produced the first user-visible defect this project has found by *watching* rather than
+testing, and the finding is not the defect. It is that **three separate pieces of the codebase
+asserted, as fact, something two committed traces already contradicted.**
+
+The user asked: *"if it's making the drive bootable, why is it still copying?"*
+
+### What was wrong
+
+`createinstallmedia` prints `Making disk bootable...` at **17.9%** (2026-08-04) and **14.7%**
+(2026-08-05) of the run. Three places treated it as the end:
+
+| Where | Claim | Effect |
+|---|---|---|
+| `InstallMediaProgress:59` | `return 0.95` — "emitted right at the end" | ring showed **95% for 25.6 of 30 minutes** |
+| `CopyProgressModel.announcesFinishing` | matched that line, flag is sticky | status read "Making the drive bootable…" for **85% of the run** |
+| `BootItHelper/main.swift:334` | "the only trustworthy signal that the bulk copy is over" | comment only — but it is the belief the other two were built on |
+
+At the moment the ring said 95%, the device had written **2.85 GB of 21.26 GB — 13.4%**.
+
+### The number came from misreading a ceiling as a value
+
+The synthesis records Gemini's guardrail as **"clamp to 95%"** — a *ceiling* on a determinate bar,
+adopted under UNANIMOUS #7 ("never reach 100% before the process exits"). It was implemented as a
+*value*, on the phase §3.2 of the same document requires to be "animated, not a frozen number".
+
+So this was not a decision that aged badly. It contradicted the synthesis on the day it was written.
+Deleting it **restores** the adopted design; nothing here overrides a gated decision.
+
+### The premise under the whole feature is false
+
+The trace's last stage line:
+
+```
+{"elapsed":1646.6,"line":"Copying to disk: 0%... 10%... ... 100%"}
+```
+
+`InstallMediaProgress` said, twice, that macOS 26 emits nothing during the copy. **It emits this**,
+and it has been sitting in `copy-run-2026-08-04.jsonl` since the day that fixture was committed —
+in the same session the claim was written. `RecordedRunTests` even *quotes the line* in a test
+docstring while the source file three directories away denied it existed.
+
+Why it looked like silence: the three middle banners arrive **0.2 ms apart**. Sequential stages
+cannot be simultaneous, so `createinstallmedia`'s stdout is **block-buffered because it is a pipe
+rather than a tty**, and every percentage is inside one line by the time we see it, at ~90%.
+BootIt's reader is not at fault — it already splits on `\r` and `\n` (`main.swift:73`).
+
+**Not acted on.** Defeating the buffering with a pty is the open question this reopens, and it
+would revisit the synthesis's core decision rather than restore it. Flagged, not attempted.
+
+### Fixing it correctly required a second fix
+
+Nulling the fraction alone would have replaced an over-claim with an under-claim: `CopyRing.value`
+returned `progress` for `.finishing`, and `progress` still holds the erase ceiling through the copy,
+so the ring would have drawn **~15% at 90% through**. It survived before only because the 0.95 fed
+it at the same instant. `.finishing` no longer draws a number either — §3.2 and #8, no exemptions.
+
+### The test that should have caught it had an exemption for it
+
+```swift
+let opaque = states.filter {
+    if case .finishing = $0.activity { return false }   // ← removed
+    return true
+}
+XCTAssertTrue(opaque.allSatisfy { $0.fraction == nil })
+```
+
+The one state that claimed a percentage was the one state the test agreed not to look at. Two more
+of the same shape: `testRealTahoeTranscriptNeverGoesBackwards` held a "verbatim" transcript with the
+counter-example line **missing**, and `testAFilesystemDrivenBarWouldShow99PercentAOneFifthOfTheWay`
+pins `df` reaching 99% at **310 s** while the banner lands at **309.1 s** — the same instant, two
+instruments, one condemned in a test and the other shipped in the UI.
+
+### What was added
+
+- `copy-run-2026-08-05.jsonl` — 907 samples, 30.0 min, the second complete trace.
+- `EveryRecordedRunTests` — properties held against **every** committed trace, so adding trace #3 is
+  the act of testing the claims rather than filing them. Four tests, including the buffering one.
+- Three mutations, all biting: restoring the 0.95, restoring the banner as the finishing signal, and
+  restoring the determinate tail ring.
+
+### Decisions
+
+- **`announcesFinishing` now matches `Copying to disk` + `100%`** — 90.4% and 91.4% across the two
+  traces. Matching the completed percentage matters: the line is `\r`-rewritten, so a partial read is
+  a legitimate earlier view of it. **n = 2, one device** — said so at the call site, and named the
+  assertion to break first if a third trace disagrees.
+- **The pty question is deferred, not skipped.** It changes what the synthesis decided, not how it
+  was implemented.
+- **The design-index row now carries the falsified premise inline**, so the next session meets it
+  before the synthesis rather than after.
+
+### Not done
+
+- **Cancel has still never been fired.** Four sessions on the list. It needs the drive, and the drive
+  is now a good installer.
+- The pty probe. One more 30-minute run would settle it.
+
+The "a comment claiming what a tool does, refuted by a fixture committed beside it" lesson was
+**folded into the existing `an-inference-recorded-as-observation-becomes-fact`** as its third
+instance rather than filed separately — it is the same defect class, and that candidate is the one a
+reader would already reach. Five new candidates plus that section, against a federation queue at 276
+pending on a 221 ceiling; the cluster is real but the budget is a cost worth naming.
+
+[promote-spine: a stage banner is printed when a stage BEGINS, so it can never mean "nearly done" — `createinstallmedia` prints "Making disk bootable" at 15% of the run with 87% of the bytes outstanding; timestamp a banner against the bytes that followed it before letting it drive a bar]
+
+[promote-spine: when a test filters out a state before asserting a property, ask whether that state is the one that violates it — BootIt exempted `.finishing` from "the ring never claims a percentage", and `.finishing` was the only state that claimed one]
+
+[promote-spine: a guardrail expressed as a CEILING ("clamp to 95%") gets implemented as a VALUE — the synthesis said never exceed 95% before exit, the code returned exactly 0.95 on the phase the same document said must show no number; when transcribing a bound into code, name it as a bound]
+
+[promote-profile:swift: a child process's stdout is block-buffered when it is a pipe rather than a tty, so `\r`-rewritten progress arrives in one batch at the end and reads as silence — three sequential stage banners landing 0.2 ms apart is the signature; the fix is a pty, not a better parser]
+
+[promote-spine: removing a bad mechanism does not remove the belief that produced it — BootIt deleted a used-bytes denominator that froze at 95%, and left a hand-written 0.95 firing on the same event, from the same false premise, one file away]
+
 ## 2026-08-05 (session 2) — v3.4.0 shipped, and the account nobody needed to create
 
 **Commits:** `031b7fc` (bump) → `c98933c` (this log entry), both pushed. Tag `v3.4.0` pushed.
