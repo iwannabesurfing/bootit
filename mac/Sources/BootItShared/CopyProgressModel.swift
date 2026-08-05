@@ -206,6 +206,23 @@ public struct CopyProgressModel {
     /// replaces the "10–20 minutes" line, which promised 20 against a measured 38.
     public static let durationRange = "typically 15–45 minutes on USB flash"
 
+    /// What the screen says between the Cancel click and the write stopping.
+    ///
+    /// Synthesis UNANIMOUS #9, decided at the gate and unimplemented until
+    /// 2026-08-05: a SIGTERM to a process in uninterruptible sleep is not
+    /// delivered until it returns from the syscall, so the UI must say it is
+    /// waiting rather than appear to have ignored the click.
+    ///
+    /// Measured on the first cancel this project ever fired: `createinstallmedia`
+    /// surfaced from state `U` to `R` **twice in 85 seconds**, and the drive wrote
+    /// 1.00 → 1.145 GB *after* the click. Until now the only feedback was one
+    /// "Cancelling…" line in a log that is collapsed by default, while the status
+    /// still read "Copying macOS to the drive…" and the byte counter climbed — so
+    /// the honest reading of that screen was that the button did nothing.
+    ///
+    /// It names the drive, not BootIt, because the delay belongs to the drive.
+    public static let cancellingStatus = "Cancelling — waiting for the drive to respond…"
+
     // MARK: - Bookkeeping
 
     private mutating func track(_ sample: CopySample) {

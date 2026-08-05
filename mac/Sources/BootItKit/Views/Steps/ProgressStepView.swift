@@ -44,7 +44,7 @@ struct ProgressStepView: View {
         HStack(alignment: .center, spacing: 26) {
             ProgressRing(value: model.ringValue)
             VStack(alignment: .leading, spacing: 12) {
-                Text(model.statusText)
+                Text(model.displayedStatus)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -63,7 +63,7 @@ struct ProgressStepView: View {
     /// anything was happening at all. Throughput and bytes answer it directly,
     /// and unlike a percentage they are measured rather than inferred.
     @ViewBuilder private var livenessLine: some View {
-        if let copy = model.copyState {
+        if let copy = model.copyState, model.showsLivenessLine {
             VStack(alignment: .leading, spacing: 3) {
                 if let detail = copy.detail {
                     Label {

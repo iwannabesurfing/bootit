@@ -1,0 +1,8 @@
+# Cancel remains live through the window, inviting a second press whose only
+# possible outcome is confirming that pressing it does nothing.
+filter: FlowTests
+file: Sources/BootItKit/Flow.swift
+--- old ---
+        case .progress: return (running && !isCancelling) || runError != nil
+--- new ---
+        case .progress: return running || runError != nil

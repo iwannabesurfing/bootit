@@ -1,5 +1,80 @@
 # BootIt — session log
 
+## 2026-08-05 (session 2, part 3) — cancel fired for the first time, and mostly passed
+
+**Tests:** 254 (248 at part 2). **17 mutations, all biting.** Version 3.4.1.
+
+### Cancel works. It has never been run until today.
+
+On the Phase 0 list since 2026-08-03, deferred four sessions because it needs a real drive and
+destroys whatever is on it. Fired mid-copy on the notarised v3.4.0 build, 85 s into a ~30 min write:
+
+```
+15:37:18.9  createinstallmedia starts (pid 95128)
+15:37:35.0  enters state U — the copy proper
+   …        writes steadily, 153 MB → 1.145 GB
+15:38:44.1  gone. no orphan, none thereafter
+```
+
+| Property | Result |
+|---|---|
+| The write actually stops | ✅ 85 s of a ~30 min job |
+| No orphaned child reparented to launchd | ✅ never reappeared |
+| Trace ends clean at 84.5 s | ✅ no truncation, no error spew |
+| Drive left mounted and sane | ✅ 1.17 GB of a partial installer |
+| Reported as **cancelled**, not failed | ✅ info banner, neutral phase marker, log stayed collapsed |
+
+So `0b79b15` — moving the cancel off `worker`, the queue the privileged call was itself blocking —
+**is correct in the real case it was written for**, confirmed rather than assumed.
+
+### What it got wrong is the part between the click and the stop
+
+`cancel()` set the flag, wrote `"Cancelling…"` to a log that is **collapsed by default**, and touched
+nothing else. So for the whole window the screen still read *"Copying macOS to the drive…"* with the
+byte counter **climbing** — measured 1.00 → 1.145 GB *after* the click, because SIGTERM cannot be
+delivered to a process in uninterruptible sleep until it surfaces. `createinstallmedia` surfaced from
+`U` to `R` **twice in 85 seconds**.
+
+Every number on that screen was true, and the screen was false. The only available reading is that
+the button did nothing.
+
+This is synthesis **UNANIMOUS #9**, decided at the 2026-08-03 gate and never built:
+
+> Cancel must tell the truth during uninterruptible sleep … the UI must say "waiting for the drive to
+> respond" rather than appear to ignore the click.
+
+Built now: an `isCancelling` window distinct from the `wasCancelled` outcome; the status line taken
+over by "Cancelling — waiting for the drive to respond…"; the liveness line suppressed, because two
+true statements that contradict each other are resolved by the user in favour of the wrong one; and
+the button relabelled `Cancelling…` and disabled, since a second press can only confirm that pressing
+it does nothing. Cleared in `endCopyReporting()`, the one defer that runs however a run ends —
+including the write finishing normally in the seconds after the click.
+
+Three mutations, all biting: status line untouched, liveness line surviving, button staying live.
+
+### Decisions
+
+- **Suppress the liveness line rather than caveat it.** It is the one place BootIt deliberately hides
+  a true, measured number. Justified because the contradiction is what misleads, not the number.
+- **Folded into v3.4.1 rather than deferred.** A release was being cut for the 95% fix anyway, and
+  shipping a cancel that looks broken while knowing why would be a choice.
+- **`isCancelling` is separate from `wasCancelled`.** Window versus outcome; collapsing them would
+  make "cancelled" unrenderable while the cancel was still pending.
+
+### Not done
+
+- **The pty probe.** Unchanged from part 2 — the copy percentages exist and arrive block-buffered;
+  that reopens the synthesis's core decision and wants its own session.
+- **Cancel latency was not measured from the click.** The watcher timestamps the process, not the
+  press, so "how many seconds did the user stare at it" is still unquantified. The fix makes the
+  window legible rather than shorter, and that is the honest claim.
+
+[promote-spine: a cancel that cannot be delivered immediately needs a state of its own — SIGTERM to a process in uninterruptible sleep waits for it to surface (measured: twice in 85 seconds), so between the click and the stop the UI must name the wait, disable the control, and stop showing counters that keep rising, or the only available reading is that the button did nothing]
+
+[promote-spine: two true numbers can make a false screen — BootIt showed "waiting for the drive to respond" over a byte counter that was still climbing, and both were accurate; when a measured value contradicts a state, suppress the value rather than caveat it, because the user resolves the contradiction in favour of the wrong one]
+
+[promote-spine: a decision recorded as UNANIMOUS in a design gate is not thereby implemented — BootIt's synthesis agreed cancel must report the uninterruptible-sleep wait, and the code shipped without it for two sessions because the gate's output was a document and nothing checked the document against the build]
+
 ## 2026-08-05 (session 2, part 2) — the hardware run, and the question that found the bug
 
 **Commits:** `a5bd14a`. **Tests:** 248 (241 at part 1), **14 mutations, all biting** (11 + 3 new).

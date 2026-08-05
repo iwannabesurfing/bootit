@@ -110,7 +110,9 @@ extension AppModel {
         case .usb:      return "Erase and Create Installer"
         // Once a build has stopped there is nothing left to cancel, and leaving
         // a dead Cancel button as the only action strands the user.
-        case .progress: return runError == nil ? "Cancel" : "Start Over"
+        case .progress:
+            guard runError == nil else { return "Start Over" }
+            return isCancelling ? "Cancelling…" : "Cancel"
         // Quit is not what someone wants next — the drive is still mounted and
         // pulling it out unejected risks the thing they just spent 15 minutes
         // making. Offer the real next action, and only then a way to leave.
@@ -154,7 +156,11 @@ extension AppModel {
         case .source:   return isSourceValid
         case .options:  return optionsReady
         case .usb:      return canStart
-        case .progress: return running || runError != nil
+        // A cancel already in flight cannot be cancelled harder, and the wait is
+        // the drive's, not a dropped click. Leaving the button live invites a
+        // second press whose only possible outcome is confirming that pressing
+        // it does nothing.
+        case .progress: return (running && !isCancelling) || runError != nil
         case .done:     return true
         }
     }

@@ -82,6 +82,17 @@ final class AppModel: ObservableObject {
     /// `runError` being set: cancelling is an outcome, not a fault, and the two
     /// must not present the same way.
     @Published var wasCancelled = false
+
+    /// Set the moment Cancel is pressed, cleared when the run actually ends.
+    ///
+    /// Distinct from `wasCancelled`, which is the *outcome*. This is the window
+    /// in between, and it is not instantaneous: the write sits in uninterruptible
+    /// sleep and cannot receive the signal until it surfaces — measured at twice
+    /// in 85 seconds on the first real cancel. Without this the screen kept
+    /// reading "Copying macOS to the drive…" with a climbing byte count, which is
+    /// a true statement of what the drive was doing and a false impression of
+    /// whether the click landed.
+    @Published var isCancelling = false
     @Published var running = false
     @Published var currentPhase: WritePhase?
 
@@ -292,6 +303,11 @@ final class AppModel: ObservableObject {
         onMain {
             self.copyModel = CopyProgressModel()
             self.copyState = nil
+            // The cancel window closes when the run does, whichever way it ended.
+            // Clearing this only in `cancel()`'s own completion path would leave
+            // "waiting for the drive" on screen when the write finished normally
+            // in the seconds after the click — the race the single defer avoids.
+            self.isCancelling = false
         }
     }
 
@@ -303,6 +319,20 @@ final class AppModel: ObservableObject {
     var ringValue: Double? { CopyRing.value(copyState, progress: progress) }
     var livenessSymbol: String { CopyRing.symbol(copyState) }
     var livenessIsWarning: Bool { CopyRing.isWarning(copyState) }
+
+    /// The status line, which a pending cancel takes over.
+    var displayedStatus: String {
+        isCancelling ? CopyProgressModel.cancellingStatus : statusText
+    }
+
+    /// Whether to show the throughput/bytes line at all.
+    ///
+    /// Suppressed while cancelling. The numbers stay *true* — the drive really is
+    /// still writing until the signal lands — but "waiting for the drive to
+    /// respond" above a rising byte count reads as a contradiction, and the one
+    /// the user resolves in favour of "it ignored me". Two true statements can
+    /// still make a false screen.
+    var showsLivenessLine: Bool { copyState != nil && !isCancelling }
 
     private func message(_ error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -399,6 +429,7 @@ final class AppModel: ObservableObject {
         cancelFlag.reset()
         runError = nil
         wasCancelled = false
+        isCancelling = false
         progress = 0
         logText = ""
         statusText = "Starting…"
@@ -426,6 +457,7 @@ final class AppModel: ObservableObject {
 
     func cancel() {
         cancelFlag.cancel()
+        isCancelling = true
         log("Cancelling…")
         // The flag alone only stops the pipeline between phases. Nearly all the
         // wall-clock time is inside a single privileged call, so the daemon has
@@ -445,7 +477,7 @@ final class AppModel: ObservableObject {
         hasAcknowledgedErase = false
         isConfirmingErase = false
         progress = 0; logText = ""; runError = nil; wasCancelled = false
-        running = false; statusText = "Starting…"; copyState = nil
+        running = false; statusText = "Starting…"; copyState = nil; isCancelling = false
         currentPhase = nil; showsLogDetails = false; showsAdvancedWindowsOptions = false
         catalog.reset()
         localISOPath = ""; bypassWin11 = false

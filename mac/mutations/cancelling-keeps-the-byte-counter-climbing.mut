@@ -1,0 +1,9 @@
+# The liveness line survives the cancel, so "waiting for the drive to respond"
+# sits above a byte count that keeps rising — measured at 1.00 to 1.145 GB after
+# the click, because SIGTERM cannot land while the process is in state U.
+filter: CopyPresentationTests
+file: Sources/BootItKit/AppModel.swift
+--- old ---
+    var showsLivenessLine: Bool { copyState != nil && !isCancelling }
+--- new ---
+    var showsLivenessLine: Bool { copyState != nil }

@@ -83,6 +83,60 @@ final class CopyPresentationTests: XCTestCase {
         XCTAssertNil(model.copyState)
         XCTAssertEqual(model.ringValue, 0)
     }
+
+    // MARK: - The cancel window (synthesis UNANIMOUS #9)
+    //
+    // Decided at the gate on 2026-08-03, unimplemented until the first cancel
+    // was ever fired on 2026-08-05. `createinstallmedia` surfaced from
+    // uninterruptible sleep twice in 85 seconds, so the gap between the click
+    // and the stop is seconds of a screen that has to mean something.
+
+    /// The status line stops describing the copy and starts describing the wait.
+    func testCancellingTakesOverTheStatusLine() {
+        let model = self.model(.writing(bytesPerSecond: 9_000_000))
+        model.statusText = "Copying macOS to the drive…"
+        XCTAssertEqual(model.displayedStatus, "Copying macOS to the drive…")
+
+        model.cancel()
+        XCTAssertTrue(model.isCancelling)
+        XCTAssertEqual(model.displayedStatus, CopyProgressModel.cancellingStatus)
+        XCTAssertTrue(model.displayedStatus.contains("waiting for the drive"),
+                      "the delay belongs to the drive and the wording must say so")
+    }
+
+    /// And the byte counter goes away, because it keeps rising after the click.
+    func testTheLivenessLineIsSuppressedWhileCancelling() {
+        let model = self.model(.writing(bytesPerSecond: 9_000_000))
+        XCTAssertTrue(model.showsLivenessLine)
+
+        model.cancel()
+        XCTAssertFalse(model.showsLivenessLine,
+                       "'waiting for the drive' above a climbing byte count reads as a contradiction")
+    }
+
+    /// The window closes however the run ends — including the write finishing
+    /// normally in the seconds after the click.
+    func testTheCancelWindowClosesWhenTheRunDoes() {
+        let model = self.model(.writing(bytesPerSecond: 9_000_000))
+        model.cancel()
+        XCTAssertTrue(model.isCancelling)
+
+        model.endCopyReporting()
+        let expectation = XCTestExpectation(description: "main queue drains")
+        DispatchQueue.main.async { expectation.fulfill() }
+        wait(for: [expectation], timeout: 2)
+        XCTAssertFalse(model.isCancelling)
+    }
+
+    /// Starting over clears it too, so a retry does not open on the last run's
+    /// pending cancel.
+    func testStartingOverClearsTheCancelWindow() {
+        let model = self.model(.writing(bytesPerSecond: 9_000_000))
+        model.cancel()
+        model.reset()
+        XCTAssertFalse(model.isCancelling)
+        XCTAssertEqual(model.displayedStatus, "Starting…")
+    }
 }
 
 /// The trace file every run leaves behind — the evidence a future percentage

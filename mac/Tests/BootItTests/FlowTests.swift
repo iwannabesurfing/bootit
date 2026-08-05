@@ -206,4 +206,36 @@ final class FlowTests: XCTestCase {
         XCTAssertFalse(model.hasAcknowledgedErase)
         XCTAssertFalse(model.isConfirmingErase)
     }
+
+    /// A cancel in flight cannot be cancelled harder.
+    ///
+    /// The wait is the drive's — `createinstallmedia` sits in uninterruptible
+    /// sleep and cannot take the signal until it surfaces. A live Cancel button
+    /// through that window invites a second press whose only possible outcome is
+    /// proving that pressing it does nothing.
+    func testCancelIsNotOfferedTwice() {
+        let model = AppModel()
+        model.step = .progress
+        model.running = true
+        XCTAssertEqual(model.primaryActionTitle, "Cancel")
+        XCTAssertTrue(model.isPrimaryActionEnabled)
+
+        model.cancel()
+        XCTAssertEqual(model.primaryActionTitle, "Cancelling…")
+        XCTAssertFalse(model.isPrimaryActionEnabled)
+    }
+
+    /// But a *stopped* run still offers the way out, cancelled or not — leaving
+    /// a dead button as the only action is what stranded users before.
+    func testAStoppedRunAlwaysOffersStartOver() {
+        let model = AppModel()
+        model.step = .progress
+        model.running = true
+        model.cancel()
+        model.runError = "Build cancelled"
+
+        XCTAssertEqual(model.primaryActionTitle, "Start Over")
+        XCTAssertTrue(model.isPrimaryActionEnabled,
+                      "a pending cancel must not disable the exit from a finished run")
+    }
 }

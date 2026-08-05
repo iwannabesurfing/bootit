@@ -1,0 +1,9 @@
+# The status line keeps describing the copy through the cancel window, so the
+# screen reads "Copying macOS to the drive…" while the user waits for a click
+# they cannot tell landed. Synthesis UNANIMOUS #9.
+filter: CopyPresentationTests
+file: Sources/BootItKit/AppModel.swift
+--- old ---
+        isCancelling ? CopyProgressModel.cancellingStatus : statusText
+--- new ---
+        statusText
