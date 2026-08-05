@@ -74,6 +74,43 @@ Three mutations, all biting: status line untouched, liveness line surviving, but
   press, so "how many seconds did the user stare at it" is still unquantified. The fix makes the
   window legible rather than shorter, and that is the honest claim.
 
+### Two things dropped, on purpose, with reasons
+
+- **The pty probe is off the list, not deferred.** Its payoff was a determinate ring for ~77% of the
+  run; against that, the app already reports measured bytes and throughput, which the synthesis
+  itself called "the actual fix for the reported symptom" (UNANIMOUS #6). The user's call, and the
+  right one. The fallback argument — "do it for the documentation" — was **overstated by me and then
+  withdrawn**: the false premise is *already* corrected in `InstallMediaProgress`, the helper
+  comment, the design-index row and `testTheCopyPercentagesExistButArriveInOneBatch`. All the probe
+  would add is *why* the output batches, which nobody needs unless they build the ring.
+  For the record, the cheap version if it ever matters: `createinstallmedia` prints
+  `Erasing disk: 0%…100%` in its first 15 s and it arrives collapsed, so a pty run needs ~20 seconds
+  and a cancel to answer it — not the full write I first claimed.
+- **"First-run Full Disk Access onboarding" was already done, and I said twice that it wasn't.**
+  Carried forward from the 2026-08-03 next-steps list without checking. `AppModel.checkUSBAccess()`
+  fires on drive selection and `USBStepView` renders `USBAccessWarning` there, beside the
+  app-replaced and administrator banners — before the erase, before the download. The stale claim
+  outlived its fix by two sessions inside the very log that recorded the fix, which is the same
+  defect class as the three corrected in part 2, committed by me, in the same session I filed a
+  candidate about it.
+
+### Next session should start with
+
+1. **Nothing carried.** v3.4.1 is published and verified from `releases/latest`; every Phase 0 item
+   from 2026-08-03 is now closed, cancel included; the queue validates clean; memory is inside
+   budget. There is no queued code and no open bug.
+2. **Before adding anything to a backlog from this log, check it is still true.** Two of the three
+   items this session inherited were already fixed or not worth doing. The log is a record of what
+   happened, not a list of what remains.
+3. **If something is wanted anyway**, in descending order of honesty about value:
+   - the standard-account auth-sheet observation — one look on a test account, changes the wording
+     of a warning that already appears at the right moment;
+   - `AppModel`'s pipeline sequencing — a deliberate, reasoned skip since 2026-08-03; the trigger is
+     a bug in the sequencing, and there is not one.
+4. **The federation queue is the real outstanding thing, and it is not BootIt's.** 276 pending
+   against a 221 ceiling before this session added eight. BootIt's own queue validates clean; the
+   drain is `_leme`'s handshake.
+
 [promote-spine: a cancel that cannot be delivered immediately needs a state of its own — SIGTERM to a process in uninterruptible sleep waits for it to surface (measured: twice in 85 seconds), so between the click and the stop the UI must name the wait, disable the control, and stop showing counters that keep rising, or the only available reading is that the button did nothing]
 
 [promote-spine: two true numbers can make a false screen — BootIt showed "waiting for the drive to respond" over a byte counter that was still climbing, and both were accurate; when a measured value contradicts a state, suppress the value rather than caveat it, because the user resolves the contradiction in favour of the wrong one]
