@@ -29,12 +29,20 @@ final class CopyPresentationTests: XCTestCase {
         XCTAssertNil(model(.starting).ringValue)
     }
 
-    func testTheRingComesBackOnceTheToolAnnouncesTheBlessStep() {
-        // "Making disk bootable" puts a real end in sight, and the tool's own
-        // output drives the bar to 0.95 there.
-        XCTAssertEqual(model(.finishing, progress: 0.95).ringValue, 0.95)
+    /// No copy state draws a number, `.finishing` included.
+    ///
+    /// It did until 2026-08-05, paired with a fabricated 0.95. With that gone,
+    /// `progress` is still at the erase ceiling during the copy, so honouring it
+    /// here would draw ~15% at 90% through the run. Both directions of the same
+    /// error; the ring stays indeterminate until the run itself completes.
+    func testTheRingStaysIndeterminateEvenForTheFinishingTail() {
+        XCTAssertNil(model(.finishing, progress: 0.15).ringValue)
+        XCTAssertNil(model(.finishing, progress: 0.95).ringValue)
     }
 
+    /// And the measured phases are untouched — this only ever governed the
+    /// opaque macOS copy, so the download, the erase and all of Windows keep
+    /// their real percentage.
     func testTheRingIsDeterminateWhenNoCopyIsRunning() {
         let model = AppModel()
         model.progress = 0.42

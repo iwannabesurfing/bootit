@@ -180,8 +180,25 @@ public struct CopyProgressModel {
     }
 
     /// The tool's own announcement that the bulk copy is over.
+    ///
+    /// This matched `Making disk bootable` until 2026-08-05. That line arrives at
+    /// **17.9%** (2026-08-04) and **14.7%** (2026-08-05) of the run, and this flag
+    /// is sticky — so the screen read "Making the drive bootable…" for the last
+    /// 85% of a 30-minute write while 18 GB was still being copied. The user
+    /// reading it asked the question that found the bug: *if it's making the
+    /// drive bootable, why is it still copying?*
+    ///
+    /// The copy-complete line is the real one, and it is the only tool output
+    /// that lands near the end in both traces — **90.4%** and **91.4%**. Matching
+    /// on the completed percentage rather than the bare prefix matters: the line
+    /// is `\r`-rewritten, so a partial `Copying to disk: 30%…` is a legitimate
+    /// earlier read of the same line.
+    ///
+    /// n = 2, one device. If a third trace disagrees, this is the assertion to
+    /// break first — `RecordedRunTests.testNothingAnnouncesFinishingUntilTheEnd`
+    /// pins it against every committed trace for exactly that reason.
     public static func announcesFinishing(_ line: String) -> Bool {
-        line.contains("Making disk bootable")
+        line.contains("Copying to disk") && line.contains("100%")
     }
 
     /// Typical duration, stated as a range because a constant cannot be honest

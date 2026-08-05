@@ -1,0 +1,12 @@
+# The ring goes determinate again for the tail. With the 0.95 deleted, progress
+# still holds the erase ceiling through the copy, so this draws ~15% at 90%
+# through the run — the under-claiming half of the same error.
+filter: CopyPresentationTests
+file: Sources/BootItKit/Views/Components/CopyRing.swift
+--- old ---
+        guard let copy else { return progress }
+        return copy.fraction
+--- new ---
+        guard let copy else { return progress }
+        if case .finishing = copy.activity { return progress }
+        return copy.fraction

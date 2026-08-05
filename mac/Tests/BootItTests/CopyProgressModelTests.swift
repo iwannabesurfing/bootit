@@ -141,12 +141,34 @@ final class CopyProgressModelTests: XCTestCase {
         XCTAssertEqual(CopyProgressModel.replay(flat).last?.activity, .idle(seconds: 240))
 
         var announced = flat
-        announced[60].line = "Making disk bootable..."
+        announced[60].line = "Copying to disk: 0%... 50%... 100%"
         let states = CopyProgressModel.replay(announced)
         XCTAssertEqual(states[59].activity, .idle(seconds: 118))
         XCTAssertEqual(states[60].activity, .finishing)
         XCTAssertEqual(states.last?.activity, .finishing)
         XCTAssertEqual(states.last?.status, "Making the drive bootable…")
+    }
+
+    /// The line that used to trigger it, and no longer may.
+    ///
+    /// "Making disk bootable" arrives at 15–18% of a real run in both committed
+    /// traces, so treating it as the announcement parked the screen on
+    /// "Making the drive bootable…" for the last 85% of a 30-minute write.
+    func testTheBootableBannerNoLongerAnnouncesFinishing() {
+        var samples = (0...10).map { CopySample(elapsed: Double($0) * 2, deviceBytes: Int64($0) * 5_000_000) }
+        samples[2].line = "Making disk bootable..."
+        let states = CopyProgressModel.replay(samples)
+
+        XCTAssertFalse(states.contains { if case .finishing = $0.activity { return true }; return false },
+                       "the banner fires at 15% of a run and cannot mean the end is near")
+        XCTAssertEqual(states.last?.status, "Copying macOS to the drive…")
+    }
+
+    /// A `\r`-rewritten copy line is read many times as it grows. Only the
+    /// completed one means the copy is over.
+    func testAPartialCopyLineDoesNotAnnounceFinishing() {
+        XCTAssertFalse(CopyProgressModel.announcesFinishing("Copying to disk: 0%... 30%..."))
+        XCTAssertTrue(CopyProgressModel.announcesFinishing("Copying to disk: 0%... 90%... 100%"))
     }
 
     // MARK: - The counter reset ChatGPT caught

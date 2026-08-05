@@ -330,10 +330,16 @@ private final class HelperService: NSObject, HelperProtocol {
             guard !trimmed.isEmpty else { return }
             self?.log(trimmed)
             self?.report(trimmed)
-            // The tool's own words go into the trace on their own sample.
-            // "Making disk bootable" is the only trustworthy signal that the
-            // bulk copy is over, so it has to be replayable alongside the
-            // counters rather than living only in the log.
+            // The tool's own words go into the trace on their own sample, so a
+            // claim about what a line means can be checked against the bytes
+            // that followed it rather than argued about.
+            //
+            // This comment used to assert that "Making disk bootable" was the
+            // only trustworthy signal that the bulk copy is over. It is not: the
+            // trace this very line writes shows it arriving at 15–18% of the run,
+            // twice. Recording the lines is what falsified the belief the code
+            // was written on — which is the argument for recording them, and the
+            // reason the reason is worth keeping accurate.
             self?.sample(CopySample(elapsed: clock.elapsed(), line: trimmed))
             tail.append(trimmed)
             if tail.count > 40 { tail.removeFirst() }

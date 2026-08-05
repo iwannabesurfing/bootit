@@ -1,0 +1,9 @@
+# The sticky .finishing flag fires on the banner again, so the screen reads
+# "Making the drive bootable…" for the last 85% of the write. Held against both
+# committed traces, not against a hand-built sample.
+filter: EveryRecordedRunTests
+file: Sources/BootItShared/CopyProgressModel.swift
+--- old ---
+        line.contains("Copying to disk") && line.contains("100%")
+--- new ---
+        line.contains("Making disk bootable")

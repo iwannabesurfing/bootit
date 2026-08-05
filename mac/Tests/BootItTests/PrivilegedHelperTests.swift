@@ -105,20 +105,28 @@ final class InstallMediaProgressTests: XCTestCase {
     }
 
     func testRealTahoeTranscriptNeverGoesBackwards() {
-        // Verbatim from a real macOS 26.6 run. Note that the copy phase — the
-        // fifteen-minute part — contributes no numbers at all.
+        // Verbatim from a real macOS 26.6 run — the complete transcript this
+        // time. The fifth line was missing here until 2026-08-05, and its absence
+        // is why "the copy phase contributes no numbers at all" survived as a
+        // comment in three files: the test that was supposed to be the verbatim
+        // record had quietly dropped the counter-example. Both committed traces
+        // contain it.
         let transcript = [
             "Erasing disk: 0%... 10%... 20%... 30%... 100%",
             "Copying essential files...",
             "Copying the macOS RecoveryOS...",
             "Making disk bootable...",
+            "Copying to disk: 0%... 10%... 20%... 30%... 40%... 50%... 60%... 70%... 80%... 90%... 100%",
             "Install media now available at \"/Volumes/Install macOS Tahoe\""
         ]
         let fractions = transcript.compactMap { InstallMediaProgress.fraction(for: $0) }
         XCTAssertEqual(fractions, fractions.sorted(), "progress must never go backwards")
         XCTAssertEqual(fractions.last, 1.0)
-        // Three of the five lines say nothing about progress; that is the point.
-        XCTAssertEqual(fractions.count, 3)
+        // Only the erase and the exit yield a fraction. Four of the six lines say
+        // nothing the bar may act on — including "Making disk bootable", which
+        // returned 0.95 until it was measured arriving at 15% of the run.
+        XCTAssertEqual(fractions, [InstallMediaProgress.eraseCeiling, 1.0])
+        XCTAssertNil(InstallMediaProgress.fraction(for: "Making disk bootable..."))
     }
 
     func testLinesWithoutProgressLeaveTheBarAlone() {

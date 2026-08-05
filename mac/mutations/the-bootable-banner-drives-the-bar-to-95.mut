@@ -1,0 +1,9 @@
+# Restores the 0.95 deleted on 2026-08-05: "Making disk bootable" claims the end
+# is near, from 15% of the run. The bar then sat at 95% for 25.6 of 30 minutes.
+filter: InstallMediaProgressTests
+file: Sources/BootItShared/InstallMediaProgress.swift
+--- old ---
+        if line.contains("Copying") { return nil }
+--- new ---
+        if line.contains("Making disk bootable") { return 0.95 }
+        if line.contains("Copying") { return nil }

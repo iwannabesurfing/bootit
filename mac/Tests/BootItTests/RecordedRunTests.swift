@@ -38,14 +38,16 @@ final class RecordedRunTests: XCTestCase {
 
     /// The headline behaviour, on real data: across a 28.8-minute run the app
     /// never once claims a percentage during the opaque copy.
+    ///
+    /// The `.finishing` states used to be filtered out of this assertion. That
+    /// exemption is why the 0.95 survived — the single state that claimed a
+    /// percentage was the single state this test agreed not to look at. There is
+    /// no filter now: `CopyProgressModel` emits `fraction: nil` unconditionally,
+    /// so the honest assertion is over every state.
     func testTheRingNeverClaimsAPercentageDuringTheCopy() {
         let states = CopyProgressModel.replay(measured)
-        let opaque = states.filter {
-            if case .finishing = $0.activity { return false }
-            return true
-        }
-        XCTAssertFalse(opaque.isEmpty)
-        XCTAssertTrue(opaque.allSatisfy { $0.fraction == nil },
+        XCTAssertFalse(states.isEmpty)
+        XCTAssertTrue(states.allSatisfy { $0.fraction == nil },
                       "a percentage here is a claim nothing in this trace supports")
     }
 
@@ -196,5 +198,116 @@ final class RecordedRunTests: XCTestCase {
         }
         XCTAssertGreaterThan(longest, 15 * 60,
                              "the filesystem's answer does not move for over fifteen minutes")
+    }
+}
+
+/// Every committed trace, held to the properties that a single run cannot
+/// establish on its own.
+///
+/// **2026-08-05.** A second complete write, same 61.5 GB stick, on the notarised
+/// v3.4.0 build: 907 samples over 30.0 minutes. It exists because a human watched
+/// the ring sit at 95% and asked why a drive being "made bootable" was still
+/// copying — a question no green test suite had asked, because the one assertion
+/// that would have caught it exempted the one state that lied.
+///
+/// These run over the traces as a set. A property proven on one run is a property
+/// of that run; the reason this class is separate is to make adding trace #3 the
+/// act of testing the claims, rather than an act of filing it.
+final class EveryRecordedRunTests: XCTestCase {
+
+    /// Each committed trace, by name so a failure says which run disagreed.
+    private static let runs: [(name: String, samples: [CopySample])] = {
+        ["copy-run-2026-08-04", "copy-run-2026-08-05"].compactMap { name in
+            guard let url = Bundle.module.url(forResource: "Fixtures/\(name)", withExtension: "jsonl"),
+                  let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+            return (name, CopySample.parseTrace(text))
+        }
+    }()
+
+    private var runs: [(name: String, samples: [CopySample])] { Self.runs }
+
+    func testBothRunsLoaded() {
+        XCTAssertEqual(runs.count, 2, "a missing fixture would silently pass every test below")
+        XCTAssertTrue(runs.allSatisfy { $0.samples.count > 800 })
+    }
+
+    /// The regression this class was created for.
+    ///
+    /// `announcesFinishing` matched "Making disk bootable" until 2026-08-05, and
+    /// the flag is sticky, so the run entered `.finishing` at 17.9% / 14.7% and
+    /// stayed there. Anything claiming the end is near must actually arrive near
+    /// the end — in *every* trace, not the one it was written against.
+    func testNothingAnnouncesFinishingUntilTheEnd() throws {
+        for run in runs {
+            let total = try XCTUnwrap(run.samples.last?.elapsed)
+            let announcements = run.samples
+                .compactMap { sample in sample.line.map { (sample.elapsed, $0) } }
+                .filter { CopyProgressModel.announcesFinishing($0.1) }
+
+            let first = try XCTUnwrap(announcements.first?.0,
+                                      "\(run.name): no line announces finishing at all")
+            XCTAssertGreaterThan(first / total, 0.80,
+                                 "\(run.name): announced finishing at \(Int(first / total * 100))% of the run")
+        }
+    }
+
+    /// The same property stated as the user saw it break: how much of the run is
+    /// spent showing the finishing status. At 14.7% in, it was 85% of a
+    /// thirty-minute write.
+    func testTheFinishingStatusIsNotMostOfTheRun() throws {
+        for run in runs {
+            let measured = run.samples.filter { $0.deviceBytes != nil || $0.line != nil }
+            let states = CopyProgressModel.replay(measured)
+            let finishing = states.filter { if case .finishing = $0.activity { return true }; return false }
+            let share = Double(finishing.count) / Double(states.count)
+
+            XCTAssertLessThan(share, 0.20,
+                              "\(run.name): \(Int(share * 100))% of the run reads 'Making the drive bootable…'")
+        }
+    }
+
+    /// The premise the deleted `0.95` rested on, stated as a falsifiable claim
+    /// rather than a comment: the bulk of the bytes land *after* the tool says it
+    /// is making the disk bootable.
+    func testMostOfTheWritingHappensAfterTheBootableBanner() throws {
+        for run in runs {
+            let banner = try XCTUnwrap(run.samples.first { ($0.line ?? "").contains("Making disk bootable") }?.elapsed,
+                                       "\(run.name): the banner both traces contain")
+            let measured = run.samples.filter { $0.deviceBytes != nil }
+            let start = try XCTUnwrap(measured.first?.deviceBytes)
+            let end = try XCTUnwrap(measured.last?.deviceBytes)
+            let atBanner = try XCTUnwrap(measured.first { $0.elapsed >= banner }?.deviceBytes)
+
+            let doneThen = Double(atBanner - start) / Double(end - start)
+            XCTAssertLessThan(doneThen, 0.25,
+                              "\(run.name): banner arrived with \(Int((1 - doneThen) * 100))% still to write")
+        }
+    }
+
+    /// macOS 26 does emit copy percentages — the claim that it "prints nothing"
+    /// was contradicted by `copy-run-2026-08-04.jsonl` on the day that fixture
+    /// was committed. What it does not do is emit them *live*.
+    ///
+    /// The three stage banners arriving within a millisecond of each other is the
+    /// evidence: sequential stages cannot be simultaneous, so the tool's stdout is
+    /// block-buffered down a pipe and released in batches. That is the finding a
+    /// pty would act on, and it is pinned here so the claim stays falsifiable.
+    func testTheCopyPercentagesExistButArriveInOneBatch() throws {
+        for run in runs {
+            let lines = run.samples.compactMap { sample in sample.line.map { (sample.elapsed, $0) } }
+
+            XCTAssertTrue(lines.contains { $0.1.contains("Copying to disk") && $0.1.contains("100%") },
+                          "\(run.name): the copy line the code claimed macOS 26 never prints")
+
+            let banners = lines.filter {
+                $0.1.contains("Copying essential files")
+                    || $0.1.contains("RecoveryOS")
+                    || $0.1.contains("Making disk bootable")
+            }
+            XCTAssertEqual(banners.count, 3, "\(run.name)")
+            let spread = try XCTUnwrap(banners.last?.0) - (banners.first?.0 ?? 0)
+            XCTAssertLessThan(spread, 0.01,
+                              "\(run.name): three sequential stages \(spread)s apart is a buffer flush, not progress")
+        }
     }
 }
