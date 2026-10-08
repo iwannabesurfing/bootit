@@ -155,7 +155,7 @@ final class AppModel: ObservableObject {
     /// arrive far faster than a stalled mount answers, and a queue of blocked
     /// `stat`s is how one slow volume becomes an exhausted thread pool.
     func checkWhetherAppWasReplaced() {
-        onMain {
+        onMain { [self] in
             guard !self.preflight.appWasReplaced, !self.bundleReadingInFlight else { return }
             self.bundleReadingInFlight = true
             let read = self.preflight.bundleIdentity
@@ -194,7 +194,7 @@ final class AppModel: ObservableObject {
     /// including the generation counter — so this is correct whichever thread
     /// calls it, rather than correct as long as every caller remembers.
     func checkUSBAccess() {
-        onMain {
+        onMain { [self] in
             guard self.platform == .macos, self.selectedDrive != nil else { return }
             let id = self.preflight.beginProbe()
             let probe = self.preflight.usbAccessProbe
