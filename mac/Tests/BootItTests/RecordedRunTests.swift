@@ -1,6 +1,5 @@
 import BootItShared
 import XCTest
-@testable import BootItKit
 
 /// The first instrumented run, replayed.
 ///

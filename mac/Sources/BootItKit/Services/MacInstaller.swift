@@ -101,7 +101,6 @@ enum MacInstallerError: LocalizedError {
 final class MacInstaller {
 
     static let softwareupdate = "/usr/sbin/softwareupdate"
-    static let diskutil       = "/usr/sbin/diskutil"
     static let eraseName      = "MACINSTALL"   // createinstallmedia renames it later
 
     private let cancel: CancelFlag

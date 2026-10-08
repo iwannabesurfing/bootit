@@ -39,7 +39,7 @@ enum SelfTest {
     static func run(osKey: String, resolveLink: Bool) {
         print("=== BootIt self-test (\(osKey)) ===")
         let cat = MicrosoftCatalog(log: { print("  ·", $0) })
-        cat.register(osKey: osKey)
+        cat.register()
         let eds = cat.editions(osKey: osKey)
         print("editions:", eds.map { "\($0.id):\($0.name)" })
         do {

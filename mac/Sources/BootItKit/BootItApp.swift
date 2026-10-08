@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 
+// periphery:ignore - instantiated by AppKit through `@NSApplicationDelegateAdaptor`
 /// Closing the window quits.
 ///
 /// BootIt removes the New Window command, so without this, closing the last
@@ -21,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 struct BootItApp: App {
+    // periphery:ignore - the wrapper installs the delegate; the value is never read
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()
 

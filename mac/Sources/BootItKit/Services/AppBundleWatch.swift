@@ -32,7 +32,9 @@ enum AppBundleWatch {
     /// every time the app comes to the front. Content is not the question —
     /// "is this still the same file I launched from" is.
     struct Identity: Equatable {
+        // periphery:ignore - read only by the synthesised `==` that `wasReplaced` uses
         let inode: UInt64
+        // periphery:ignore - read only by the synthesised `==` that `wasReplaced` uses
         let device: Int
     }
 

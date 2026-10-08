@@ -1,4 +1,3 @@
-import BootItShared
 import Foundation
 
 /// Answers one question: when a write to a USB drive is refused, *who* was

@@ -1,0 +1,8 @@
+# Dead-code check (DEAD-P1). Run in CI after the build — see .github/workflows/ci.yml.
+#
+# `#Preview` blocks are the only users of PreviewModel, and Periphery does not
+# see into them without this. Deliberately NOT `retain_equatable_properties`:
+# measured 2026-10-08, it also hid `USBDisk.label`, a genuinely dead property on
+# a Hashable type. Properties read only through a synthesised `==` carry a
+# `periphery:ignore` with the reason instead.
+retain_swift_ui_previews: true

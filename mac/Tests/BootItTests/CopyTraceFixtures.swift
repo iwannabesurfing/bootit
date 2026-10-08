@@ -41,7 +41,6 @@ enum CopyTraceFixtures {
 
     static let runDuration: Double = 2233
     static let deviceBytesTotal: Int64 = 21_266_141_696
-    static let payloadLanded: Int64 = 20_105_474_048
 
     /// `df` used-bytes at `t`, following the four measured points and then flat.
     static func volumeUsed(at t: Double) -> Int64 {

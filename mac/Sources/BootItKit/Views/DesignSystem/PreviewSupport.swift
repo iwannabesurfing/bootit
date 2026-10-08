@@ -32,9 +32,6 @@ enum PreviewModel {
         MacOSInstaller(title: "macOS Sonoma", version: "14.8", build: "23J40", sizeKiB: 13_400_000)
     ]
 
-    /// Base model — nothing chosen yet.
-    static func fresh() -> AppModel { AppModel() }
-
     static func platform(_ platform: AppModel.Platform?) -> AppModel {
         let model = AppModel()
         model.platform = platform

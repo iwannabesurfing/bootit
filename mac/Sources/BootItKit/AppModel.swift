@@ -12,9 +12,6 @@ final class AppModel: ObservableObject {
         case windows, macos
         var id: String { rawValue }
         var title: String { self == .windows ? "Windows" : "macOS" }
-        // Kept version-agnostic on purpose: the macOS list comes live from
-        // `softwareupdate`, so naming the newest release here would go stale.
-        var subtitle: String { self == .windows ? "Windows 10 or 11" : "Ventura or later" }
         var symbol: String { self == .windows ? "pc" : "apple.logo" }
     }
 
@@ -347,7 +344,7 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             do {
                 let cat = MicrosoftCatalog()
-                cat.register(osKey: key)
+                cat.register()
                 let eds = cat.editions(osKey: key)
                 let langs = try cat.languages(editionID: eds.first?.id ?? "", osKey: key)
                 self.onMain { self.catalog.acceptWindows(editions: eds, languages: langs, id: loadID) }

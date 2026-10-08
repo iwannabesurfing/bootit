@@ -103,3 +103,27 @@ jobs:
         run: |
           brew install swiftlint
           swiftlint lint --strict
+
+      # Dead code (DEAD-P1). The compiler only warns about unused locals and
+      # privates; this catches the rest. The first scan, 2026-10-08, found
+      # `HelperInfo.version` still standing under a comment claiming the app
+      # compared it — two months after the fingerprint check replaced it, and
+      # the second time that exact shape has shipped here. No baseline: the 13
+      # findings were deleted in the same commit, so the gate starts from zero.
+      #
+      # Lets Periphery run its own `swift build` rather than `--skip-build
+      # --index-store-path`: where SwiftPM writes the index store differs between
+      # toolchains (`.build/out` under Xcode 27, nothing at `.build/debug/index`),
+      # and a wrong path is a scan of nothing that reports clean. The build is
+      # incremental on top of the one above.
+      #
+      # Verified in both directions on 2026-10-08: the clean tree exits 0, and one
+      # planted `func plantedDeadCode() {}` makes it exit 1 naming the line.
+      # Intentional symbols take `// periphery:ignore - <reason>`, never an exclude.
+      - name: Periphery (dead code, strict)
+        env:
+          PERIPHERY_TOKEN: ${{ secrets.PERIPHERY_TOKEN }}
+        run: |
+          brew install periphery-pro/tap/periphery-cli
+          periphery version
+          periphery scan --strict --disable-update-check

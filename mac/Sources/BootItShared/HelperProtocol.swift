@@ -12,11 +12,6 @@ public enum HelperInfo {
     public static let machServiceName = "au.media.bootit.helper"
     public static let plistName       = "au.media.bootit.helper.plist"
 
-    /// Bumped whenever the helper's behaviour changes. The app compares this
-    /// against the installed daemon and re-registers on a mismatch, so an app
-    /// update can never end up talking to a helper from an older version.
-    public static let version = "7"
-
     /// The app's Developer ID team. Both sides pin the other to this.
     public static let teamIdentifier = "MD4M4DL5PP"
 

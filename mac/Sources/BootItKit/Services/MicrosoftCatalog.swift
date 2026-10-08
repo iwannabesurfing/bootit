@@ -101,7 +101,7 @@ final class MicrosoftCatalog {
     /// Register the session so the download-links call isn't rejected.
     /// Idempotent. Best-effort: failures here don't throw because the SKU
     /// call still works without them.
-    func register(osKey: String) {
+    func register() {
         if registered { return }
         log("Connecting to Microsoft…")
         _ = try? get("https://vlscppe.microsoft.com/tags?org_id=\(Self.orgID)&session_id=\(sessionID)")
@@ -140,7 +140,7 @@ final class MicrosoftCatalog {
 
     /// Languages = one SKU per language for the chosen edition.
     func languages(editionID: String, osKey: String) throws -> [CatalogItem] {
-        register(osKey: osKey)
+        register()
         log("Fetching languages…")
         let url = "\(Self.skuAPI)?profile=\(Self.profile)&productEditionId=\(editionID)"
             + "&SKU=undefined&friendlyFileName=undefined&Locale=\(Self.locale)&sessionID=\(sessionID)"
@@ -153,7 +153,7 @@ final class MicrosoftCatalog {
 
     /// Download options for a SKU. DownloadType: 0 = x86, 1 = x64, 2 = ARM64.
     private func links(skuID: String, osKey: String) throws -> [LinkResponse.Option] {
-        register(osKey: osKey)
+        register()
         log("Getting download link…")
         let url = "\(Self.linkAPI)?profile=\(Self.profile)&productEditionId=undefined"
             + "&SKU=\(skuID)&friendlyFileName=undefined&Locale=\(Self.locale)&sessionID=\(sessionID)"
@@ -201,7 +201,6 @@ private struct SkuResponse: Decodable {
 
 private struct LinkResponse: Decodable {
     struct Option: Decodable {
-        let Name: String?
         let Uri: String?
         let DownloadType: Int?
     }

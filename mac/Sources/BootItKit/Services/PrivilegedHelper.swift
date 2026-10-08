@@ -231,12 +231,6 @@ final class PrivilegedHelper {
         return helper
     }
 
-    private func clearConnection() {
-        lock.lock()
-        connection = nil
-        lock.unlock()
-    }
-
     /// Abandon whatever call is waiting, and drop the connection.
     ///
     /// Internal rather than private so a test can drive it: `call()` waits
